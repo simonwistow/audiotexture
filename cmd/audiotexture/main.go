@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/asticode/go-astiav"
@@ -13,6 +14,7 @@ import (
 	"github.com/simonwistow/audiotexture/audio"
 	"github.com/simonwistow/audiotexture/beats"
 	"github.com/simonwistow/audiotexture/images"
+	"github.com/simonwistow/audiotexture/render"
 	"github.com/simonwistow/audiotexture/texture"
 	"github.com/simonwistow/audiotexture/video"
 )
@@ -52,7 +54,7 @@ func usage() {
 
 Usage:
   audiotexture generate --images <dir> --audio <file> --out <file.mp4> [flags]
-  audiotexture analyse --audio <file>
+  audiotexture analyse --audio <file> [--times]
   audiotexture list-algorithms
 
 Images are used in lexical filename order.`)
@@ -62,7 +64,9 @@ func runGenerate(args []string) error {
 	fs := flag.NewFlagSet("generate", flag.ExitOnError)
 	imagesDir := fs.String("images", "", "directory of source images (required)")
 	audioPath := fs.String("audio", "", "soundtrack: mp3, m4a, flac, ogg, wav, ... (required)")
-	outPath := fs.String("out", "", "output movie file (required)")
+	outPath := fs.String("out", "", "output movie file")
+	framesDir := fs.String("frames", "", "also write numbered frames here, as the original Perl did")
+	beatFile := fs.String("beats", "", "read beat times from a file instead of detecting them")
 	algorithm := fs.String("algorithm", "even", "texture algorithm (see list-algorithms)")
 	framerate := fs.Float64("framerate", video.DefaultFrameRate, "output frame rate")
 	width := fs.Int("width", video.DefaultWidth, "output width in pixels")
@@ -83,9 +87,13 @@ func runGenerate(args []string) error {
 		return err
 	}
 
-	if *imagesDir == "" || *audioPath == "" || *outPath == "" {
+	if *imagesDir == "" || *audioPath == "" {
 		fs.Usage()
-		return fmt.Errorf("--images, --audio and --out are all required")
+		return fmt.Errorf("--images and --audio are both required")
+	}
+	if *outPath == "" && *framesDir == "" {
+		fs.Usage()
+		return fmt.Errorf("one of --out or --frames is required")
 	}
 
 	// libav* logs to stderr by default, including harmless complaints about
@@ -112,12 +120,16 @@ func runGenerate(args []string) error {
 	}
 	duration := pcm.Duration()
 
-	detected, err := beats.Detect(pcm, &beats.Options{
+	var detected *beats.Result
+	if *beatFile != "" {
+		if detected, err = beats.LoadFile(*beatFile); err != nil {
+			return err
+		}
+	} else if detected, err = beats.Detect(pcm, &beats.Options{
 		FixedBPM:  *bpm,
 		StartBPM:  *startBPM,
 		Tightness: *tightness,
-	})
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("detecting beats: %w", err)
 	}
 
@@ -133,8 +145,25 @@ func runGenerate(args []string) error {
 	}
 
 	if !*quiet {
-		fmt.Printf("%d images, %s of audio, %d beats at %.1f BPM, %s algorithm\n",
-			len(imgs), formatDuration(duration), len(detected.Times), detected.BPM, *algorithm)
+		source := "detected"
+		if *beatFile != "" {
+			source = "from " + filepath.Base(*beatFile)
+		}
+		fmt.Printf("%d images, %s of audio, %d beats %s at %.1f BPM, %s algorithm\n",
+			len(imgs), formatDuration(duration), len(detected.Times), source, detected.BPM, *algorithm)
+	}
+
+	if *framesDir != "" {
+		n, err := render.FrameDirectory(*framesDir, onsets, duration, *framerate)
+		if err != nil {
+			return err
+		}
+		if !*quiet {
+			fmt.Printf("Wrote %d frames to %s at %g fps.\n", n, *framesDir, *framerate)
+		}
+		if *outPath == "" {
+			return nil
+		}
 	}
 
 	opts := video.Options{
@@ -167,6 +196,7 @@ func runAnalyse(args []string) error {
 	bpm := fs.Float64("bpm", 0, "override beat detection with a fixed tempo")
 	startBPM := fs.Float64("start-bpm", beats.DefaultStartBPM, "centre of the tempo prior")
 	tightness := fs.Float64("tightness", beats.DefaultTightness, "how strictly to hold an even beat grid")
+	beatFile := fs.String("beats", "", "read beat times from a file instead of detecting them")
 	times := fs.Bool("times", false, "print every beat time, one per line")
 	verbose := fs.Bool("verbose", false, "show FFmpeg's own logging")
 	if err := fs.Parse(args); err != nil {
@@ -187,12 +217,16 @@ func runAnalyse(args []string) error {
 	if err != nil {
 		return err
 	}
-	detected, err := beats.Detect(pcm, &beats.Options{
+	var detected *beats.Result
+	if *beatFile != "" {
+		if detected, err = beats.LoadFile(*beatFile); err != nil {
+			return err
+		}
+	} else if detected, err = beats.Detect(pcm, &beats.Options{
 		FixedBPM:  *bpm,
 		StartBPM:  *startBPM,
 		Tightness: *tightness,
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 

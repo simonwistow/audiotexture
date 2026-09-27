@@ -108,8 +108,12 @@ type Result struct {
 	// Onset is the onset strength envelope, one value per hop. Exposed
 	// because the texture algorithms can weight beats by it.
 	Onset []float64
-	// HopSeconds is the time between consecutive Onset values.
+	// HopSeconds is the time between consecutive Onset values. Zero when the
+	// beats came from a file rather than from analysis.
 	HopSeconds float64
+	// Duration is the track length in seconds, when the source reported one.
+	// Detect leaves this zero; the caller already knows it from the audio.
+	Duration float64
 }
 
 // Strength returns the onset strength at time t in seconds, or 0 if t falls
