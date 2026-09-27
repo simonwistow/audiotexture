@@ -139,6 +139,7 @@ func runGenerate(args []string) error {
 		Duration:  duration,
 		FrameRate: *framerate,
 		Strength:  detected.Strength,
+		Novelty:   detected.NoveltyAt,
 	})
 	if err != nil {
 		return fmt.Errorf("running algorithm %q: %w", *algorithm, err)

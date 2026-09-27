@@ -27,18 +27,22 @@ type Input struct {
 	// FrameRate is the output frame rate. The legacy algorithm quantises to
 	// this grid, because the original Perl worked in frame numbers.
 	FrameRate float64
-	// Strength, if set, reports the onset strength at a given time. Used to
-	// prefer structurally significant beats over merely regular ones.
+	// Strength, if set, reports the onset strength at a given time: how much
+	// new energy arrives there.
 	Strength func(t float64) float64
+	// Novelty, if set, reports the audio novelty at a given time in [0, 1]:
+	// how much the music changes character there, as opposed to merely how
+	// loud it is. Used to prefer structural boundaries over ordinary beats.
+	Novelty func(t float64) float64
 }
 
-// strengthAt returns the onset strength at t, or 1 when no envelope is
-// available, so that callers can weight uniformly without a nil check.
-func (in Input) strengthAt(t float64) float64 {
-	if in.Strength == nil {
-		return 1
+// noveltyAt returns the audio novelty at t, or 0 when none is available, so
+// that callers can weight without a nil check.
+func (in Input) noveltyAt(t float64) float64 {
+	if in.Novelty == nil {
+		return 0
 	}
-	return in.Strength(t)
+	return in.Novelty(t)
 }
 
 // Algorithm assigns images to onsets in time across the audio duration.

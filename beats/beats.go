@@ -114,6 +114,13 @@ type Result struct {
 	// Duration is the track length in seconds, when the source reported one.
 	// Detect leaves this zero; the caller already knows it from the audio.
 	Duration float64
+
+	// Novelty is the audio novelty curve: how much the music changes
+	// character at each instant, in [0, 1]. Empty when the beats came from a
+	// file rather than from analysis.
+	Novelty []float64
+	// NoveltySeconds is the time between consecutive Novelty values.
+	NoveltySeconds float64
 }
 
 // Strength returns the onset strength at time t in seconds, or 0 if t falls
@@ -148,7 +155,7 @@ func Detect(pcm *audio.PCM, opts *Options) (*Result, error) {
 		return nil, fmt.Errorf("audio is shorter than one analysis window (%d samples)", o.WindowSize)
 	}
 
-	env := onsetStrength(pcm.Samples, pcm.SampleRate, &o)
+	env, spec := onsetStrength(pcm.Samples, pcm.SampleRate, &o)
 	if len(env) < 2 {
 		return nil, fmt.Errorf("audio is too short to analyse")
 	}
@@ -168,9 +175,24 @@ func Detect(pcm *audio.PCM, opts *Options) (*Result, error) {
 	}
 
 	return &Result{
-		BPM:        bpm,
-		Times:      times,
-		Onset:      env,
-		HopSeconds: hopSeconds,
+		BPM:            bpm,
+		Times:          times,
+		Onset:          env,
+		HopSeconds:     hopSeconds,
+		Novelty:        novelty(spec, hopSeconds),
+		NoveltySeconds: noveltyHopSeconds,
 	}, nil
+}
+
+// NoveltyAt returns the audio novelty at time t in seconds, in [0, 1], or 0
+// when no novelty curve is available.
+func (r *Result) NoveltyAt(t float64) float64 {
+	if r.NoveltySeconds <= 0 || len(r.Novelty) == 0 {
+		return 0
+	}
+	i := int(t/r.NoveltySeconds + 0.5)
+	if i < 0 || i >= len(r.Novelty) {
+		return 0
+	}
+	return r.Novelty[i]
 }

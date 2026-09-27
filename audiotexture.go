@@ -92,6 +92,7 @@ func Generate(imagesDir, audioPath, outPath string, opts Options) (*Result, erro
 		Duration:  duration,
 		FrameRate: frameRate,
 		Strength:  detected.Strength,
+		Novelty:   detected.NoveltyAt,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("running algorithm %q: %w", opts.Algorithm, err)

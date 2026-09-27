@@ -159,3 +159,54 @@ func BenchmarkDetect(b *testing.B) {
 		}
 	}
 }
+
+// TestNoveltyFindsStructuralBoundary checks that the novelty curve peaks where
+// the music changes character, not merely where it is loud.
+func TestNoveltyFindsStructuralBoundary(t *testing.T) {
+	const (
+		rate     = 22050
+		duration = 30.0
+		boundary = 15.0
+	)
+	// Two halves with the same tempo and the same loudness, differing only in
+	// timbre: a low bed before the boundary, a bright one after. An onset
+	// detector sees nothing special at 15s; a novelty curve should.
+	samples := testaudio.ClickTrack(rate, duration, 120)
+	for i := range samples {
+		tSec := float64(i) / rate
+		freq := 150.0
+		if tSec >= boundary {
+			freq = 3000.0
+		}
+		samples[i] += 0.3 * math.Sin(2*math.Pi*freq*tSec)
+	}
+
+	r, err := beats.Detect(&audio.PCM{Samples: samples, SampleRate: rate}, nil)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if len(r.Novelty) == 0 {
+		t.Fatal("no novelty curve computed")
+	}
+
+	// The peak should be within a couple of seconds of the change.
+	var peak float64
+	peakAt := -1.0
+	for i, v := range r.Novelty {
+		if v > peak {
+			peak, peakAt = v, float64(i)*r.NoveltySeconds
+		}
+	}
+	if math.Abs(peakAt-boundary) > 2.0 {
+		t.Errorf("novelty peaks at %.2fs, want within 2s of %.1fs", peakAt, boundary)
+	}
+
+	// And it should be much higher there than in the middle of a section.
+	if atBoundary, midSection := r.NoveltyAt(boundary), r.NoveltyAt(7.0); atBoundary <= 3*midSection {
+		t.Errorf("novelty at the boundary (%.3f) should dominate mid-section (%.3f)", atBoundary, midSection)
+	}
+
+	if r.NoveltyAt(-1) != 0 || r.NoveltyAt(1e6) != 0 {
+		t.Error("novelty outside the analysed range should be 0")
+	}
+}

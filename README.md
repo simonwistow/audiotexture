@@ -134,8 +134,27 @@ func (myAlgorithm) Assign(in texture.Input) ([]texture.Onset, error) { ... }
   beat within half a shot-length, stack the ones that find nothing and spread
   them out once a later image does. Greedy and not optimal, but it is what
   produced the original videos.
+- **`optimal`** — the same objective solved exactly, by dynamic programming
+  over every beat instead of taking the first that fits. Against a steady
+  pulse this is barely distinguishable from `legacy`; it earns its keep when
+  the beats are sparse or clustered, which is where the greedy version runs
+  out of reachable beats and falls back to spreading images evenly.
+- **`novelty`** — `optimal`, but beats are weighted by *audio novelty*: how
+  much the music changes character there, rather than how loud it is. Cuts
+  still land on the pulse, but given a choice of nearby beats they prefer the
+  one where the drums enter or the section turns. Falls back to `optimal`
+  when no novelty curve is available.
+- **`bars`** — hold every image for the same number of *beats* rather than the
+  same number of seconds, snapped to a musical length (1, 2, 4, 8, 16 …).
+  Every shot is then exactly a bar, or two, or half, which reads as
+  deliberate in a way near-even spacing does not.
 
-## How the beat detection works
+`even` and `legacy` reproduce old behaviour; `optimal`, `novelty` and `bars`
+are new. Adding your own is a `texture.Register` call — see below.
+
+## How the analysis works
+
+### Beat detection
 
 An implementation of Ellis (2007). A mel-scaled spectral flux "onset strength"
 envelope says how much new energy appears at each instant. Its
@@ -148,6 +167,20 @@ globally best sequence, so the grid holds its place through a quiet passage
 instead of latching onto whatever transient happens to be nearby.
 
 About 170 ms for a three-minute track.
+
+### Audio novelty
+
+Onset strength says how much new energy arrives at an instant. That is not the
+same question as whether the music *changed* there: a snare hit is a strong
+onset but no kind of boundary, while the bar where the drums first enter may be
+no louder than the one before it.
+
+Following Foote, Cooper and Girgensohn (2002), `audiotexture` builds a
+self-similarity matrix of the track against itself and slides a checkerboard
+kernel down its diagonal. The kernel rewards instants where the recent past is
+self-similar, the near future is self-similar, and the two are unlike each
+other — which is what a section boundary looks like. The `novelty` algorithm
+uses the result to decide which beats are worth cutting on.
 
 ## References
 

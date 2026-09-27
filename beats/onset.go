@@ -13,14 +13,19 @@ import "math"
 // does not.
 //
 // The returned envelope has one value per STFT hop.
-func onsetStrength(samples []float64, sampleRate int, o *Options) []float64 {
+func onsetStrength(samples []float64, sampleRate int, o *Options) ([]float64, [][]float64) {
 	spec := melSpectrogram(samples, sampleRate, o)
 	if len(spec) < 2 {
-		return nil
+		return nil, nil
 	}
+	toDB(spec)
+	return fluxFrom(spec), spec
+}
 
-	// Power to dB, with the usual 80 dB floor below the loudest bin so that
-	// near-silence does not produce enormous negative swings.
+// toDB converts a power spectrogram to decibels in place, with the usual 80 dB
+// floor below the loudest bin so that near-silence does not produce enormous
+// negative swings.
+func toDB(spec [][]float64) {
 	var peak float64
 	for _, frame := range spec {
 		for _, v := range frame {
@@ -37,7 +42,11 @@ func onsetStrength(samples []float64, sampleRate int, o *Options) []float64 {
 			frame[b] = 10 * math.Log10(math.Max(v, floor))
 		}
 	}
+}
 
+// fluxFrom takes the half-wave rectified first difference of a dB
+// spectrogram, averaged across bands.
+func fluxFrom(spec [][]float64) []float64 {
 	bands := len(spec[0])
 	env := make([]float64, len(spec))
 	for t := 1; t < len(spec); t++ {
