@@ -1,4 +1,6 @@
-package audio
+// Package avutil holds small libav* helpers shared by the decoding and
+// encoding sides of audiotexture.
+package avutil
 
 import (
 	"regexp"
@@ -23,7 +25,7 @@ var canonicalLayouts = map[int]astiav.ChannelLayout{
 	8: astiav.ChannelLayout7Point1,
 }
 
-// normalizeChannelLayout replaces an unspecified channel layout on f with the
+// NormalizeChannelLayout replaces an unspecified channel layout on f with the
 // canonical layout for that channel count.
 //
 // Some decoders (notably PCM in WAV) report a layout with no channel order,
@@ -35,7 +37,7 @@ var canonicalLayouts = map[int]astiav.ChannelLayout{
 //
 // Layouts that do specify an order are left alone, so a genuine 5.1(side)
 // stream is not silently reinterpreted as 5.1.
-func normalizeChannelLayout(f *astiav.Frame) {
+func NormalizeChannelLayout(f *astiav.Frame) {
 	l := f.ChannelLayout()
 	if !unspecifiedLayout.MatchString(l.String()) {
 		return

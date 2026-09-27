@@ -1,7 +1,7 @@
 package texture
 
 func init() {
-	Register("even", evenAlgorithm{})
+	RegisterWithDescription("even", "ignore beats; space images equally across the track", evenAlgorithm{})
 }
 
 // evenAlgorithm spaces images equally across the duration, ignoring beats.

@@ -12,6 +12,8 @@ import (
 	"math"
 
 	"github.com/asticode/go-astiav"
+
+	"github.com/simonwistow/audiotexture/internal/avutil"
 )
 
 // DefaultSampleRate is the rate audio is resampled to for analysis. 22050 Hz
@@ -204,7 +206,7 @@ func (d *decoder) receiveFrames() error {
 
 func (d *decoder) resample() error {
 	defer d.decoded.Unref()
-	normalizeChannelLayout(d.decoded)
+	avutil.NormalizeChannelLayout(d.decoded)
 	if err := d.swr.ConvertFrame(d.decoded, d.resampled); err != nil {
 		return fmt.Errorf("resampling: %w", err)
 	}

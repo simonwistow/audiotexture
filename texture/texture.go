@@ -44,3 +44,18 @@ func List() []string {
 	sort.Strings(names)
 	return names
 }
+
+// descriptions holds a one-line summary per registered algorithm, for
+// list-algorithms and for godoc.
+var descriptions = map[string]string{}
+
+// RegisterWithDescription registers a with a summary shown by the CLI.
+func RegisterWithDescription(name, description string, a Algorithm) {
+	Register(name, a)
+	descriptions[name] = description
+}
+
+// Describe returns the one-line summary registered for name, if any.
+func Describe(name string) string {
+	return descriptions[name]
+}
