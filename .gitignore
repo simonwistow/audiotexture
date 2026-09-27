@@ -1,3 +1,5 @@
 /audiotexture
-internal/ffmpeg/vendor/
 /old/
+/testdata/out/
+*.mp4
+*.mov

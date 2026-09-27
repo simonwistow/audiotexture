@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"audiotexture/internal/images"
-	"audiotexture/internal/render"
-	"audiotexture/internal/texture"
+	"github.com/simonwistow/audiotexture/images"
+	"github.com/simonwistow/audiotexture/render"
+	"github.com/simonwistow/audiotexture/texture"
 )
 
 func main() {

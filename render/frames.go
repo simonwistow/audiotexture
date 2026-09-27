@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 
-	"audiotexture/internal/texture"
+	"github.com/simonwistow/audiotexture/texture"
 )
 
 var frameFilePattern = regexp.MustCompile(`^\d{6}\.[A-Za-z0-9]+$`)
