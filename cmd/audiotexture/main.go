@@ -11,6 +11,7 @@ import (
 	"github.com/asticode/go-astiav"
 
 	"github.com/simonwistow/audiotexture/audio"
+	"github.com/simonwistow/audiotexture/beats"
 	"github.com/simonwistow/audiotexture/images"
 	"github.com/simonwistow/audiotexture/texture"
 	"github.com/simonwistow/audiotexture/video"
@@ -26,6 +27,8 @@ func main() {
 	switch os.Args[1] {
 	case "generate":
 		err = runGenerate(os.Args[2:])
+	case "analyse", "analyze":
+		err = runAnalyse(os.Args[2:])
 	case "list-algorithms":
 		for _, name := range texture.List() {
 			fmt.Printf("%-10s %s\n", name, texture.Describe(name))
@@ -49,6 +52,7 @@ func usage() {
 
 Usage:
   audiotexture generate --images <dir> --audio <file> --out <file.mp4> [flags]
+  audiotexture analyse --audio <file>
   audiotexture list-algorithms
 
 Images are used in lexical filename order.`)
@@ -65,6 +69,9 @@ func runGenerate(args []string) error {
 	height := fs.Int("height", video.DefaultHeight, "output height in pixels")
 	crf := fs.Int("crf", video.DefaultCRF, "x264 quality: lower is better, 18-24 is sane")
 	preset := fs.String("preset", video.DefaultPreset, "x264 preset: ultrafast ... veryslow")
+	bpm := fs.Float64("bpm", 0, "override beat detection with a fixed tempo")
+	startBPM := fs.Float64("start-bpm", beats.DefaultStartBPM, "centre of the tempo prior")
+	tightness := fs.Float64("tightness", beats.DefaultTightness, "how strictly to hold an even beat grid")
 	quiet := fs.Bool("quiet", false, "suppress progress output")
 	verbose := fs.Bool("verbose", false, "show FFmpeg's own logging")
 	fs.Usage = func() {
@@ -105,14 +112,23 @@ func runGenerate(args []string) error {
 	}
 	duration := pcm.Duration()
 
-	onsets, err := algo.Assign(imgs, nil, duration)
+	detected, err := beats.Detect(pcm, &beats.Options{
+		FixedBPM:  *bpm,
+		StartBPM:  *startBPM,
+		Tightness: *tightness,
+	})
+	if err != nil {
+		return fmt.Errorf("detecting beats: %w", err)
+	}
+
+	onsets, err := algo.Assign(imgs, detected.Times, duration)
 	if err != nil {
 		return fmt.Errorf("running algorithm %q: %w", *algorithm, err)
 	}
 
 	if !*quiet {
-		fmt.Printf("%d images, %s of audio, %s algorithm\n",
-			len(imgs), formatDuration(duration), *algorithm)
+		fmt.Printf("%d images, %s of audio, %d beats at %.1f BPM, %s algorithm\n",
+			len(imgs), formatDuration(duration), len(detected.Times), detected.BPM, *algorithm)
 	}
 
 	opts := video.Options{
@@ -135,6 +151,52 @@ func runGenerate(args []string) error {
 			fmt.Println()
 		}
 		fmt.Printf("Wrote %s\n", *outPath)
+	}
+	return nil
+}
+
+func runAnalyse(args []string) error {
+	fs := flag.NewFlagSet("analyse", flag.ExitOnError)
+	audioPath := fs.String("audio", "", "audio file to analyse (required)")
+	bpm := fs.Float64("bpm", 0, "override beat detection with a fixed tempo")
+	startBPM := fs.Float64("start-bpm", beats.DefaultStartBPM, "centre of the tempo prior")
+	tightness := fs.Float64("tightness", beats.DefaultTightness, "how strictly to hold an even beat grid")
+	times := fs.Bool("times", false, "print every beat time, one per line")
+	verbose := fs.Bool("verbose", false, "show FFmpeg's own logging")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *audioPath == "" {
+		fs.PrintDefaults()
+		return fmt.Errorf("--audio is required")
+	}
+
+	if *verbose {
+		astiav.SetLogLevel(astiav.LogLevelInfo)
+	} else {
+		astiav.SetLogLevel(astiav.LogLevelQuiet)
+	}
+
+	pcm, err := audio.Decode(*audioPath, 0)
+	if err != nil {
+		return err
+	}
+	detected, err := beats.Detect(pcm, &beats.Options{
+		FixedBPM:  *bpm,
+		StartBPM:  *startBPM,
+		Tightness: *tightness,
+	})
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("duration %s\n", formatDuration(pcm.Duration()))
+	fmt.Printf("tempo    %.2f BPM\n", detected.BPM)
+	fmt.Printf("beats    %d\n", len(detected.Times))
+	if *times {
+		for _, t := range detected.Times {
+			fmt.Printf("%.4f\n", t)
+		}
 	}
 	return nil
 }
