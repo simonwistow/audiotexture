@@ -48,7 +48,7 @@ generate flags:
   --out        output movie file                     (--out or --frames)
   --frames     also write numbered frames here, as the original Perl did
   --beats      read beat times from a file instead of detecting them
-  --algorithm  texture algorithm (default "even")
+  --algorithm  texture algorithm (default "legacy")
   --framerate  output frame rate (default 24)
   --width      output width (default 1280)
   --height     output height (default 720)

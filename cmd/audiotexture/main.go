@@ -67,7 +67,7 @@ func runGenerate(args []string) error {
 	outPath := fs.String("out", "", "output movie file")
 	framesDir := fs.String("frames", "", "also write numbered frames here, as the original Perl did")
 	beatFile := fs.String("beats", "", "read beat times from a file instead of detecting them")
-	algorithm := fs.String("algorithm", "even", "texture algorithm (see list-algorithms)")
+	algorithm := fs.String("algorithm", "legacy", "texture algorithm (see list-algorithms)")
 	framerate := fs.Float64("framerate", video.DefaultFrameRate, "output frame rate")
 	width := fs.Int("width", video.DefaultWidth, "output width in pixels")
 	height := fs.Int("height", video.DefaultHeight, "output height in pixels")
