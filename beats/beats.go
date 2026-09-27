@@ -117,9 +117,11 @@ type Result struct {
 
 	// Novelty is the audio novelty curve: how much the music changes
 	// character at each instant, in [0, 1]. Empty when the beats came from a
-	// file rather than from analysis.
+	// file rather than from analysis. Entry i covers the span
+	// [i*NoveltySeconds, (i+1)*NoveltySeconds), so it describes the instant
+	// at its centre.
 	Novelty []float64
-	// NoveltySeconds is the time between consecutive Novelty values.
+	// NoveltySeconds is the span each Novelty value covers.
 	NoveltySeconds float64
 }
 
@@ -186,13 +188,23 @@ func Detect(pcm *audio.PCM, opts *Options) (*Result, error) {
 
 // NoveltyAt returns the audio novelty at time t in seconds, in [0, 1], or 0
 // when no novelty curve is available.
+//
+// Each novelty value summarises a whole NoveltySeconds-long span rather than
+// an instant, so the lookup takes the span containing t. Rounding to the
+// nearest index instead would bias every reported boundary half a span early.
 func (r *Result) NoveltyAt(t float64) float64 {
-	if r.NoveltySeconds <= 0 || len(r.Novelty) == 0 {
+	if r.NoveltySeconds <= 0 || len(r.Novelty) == 0 || t < 0 {
 		return 0
 	}
-	i := int(t/r.NoveltySeconds + 0.5)
-	if i < 0 || i >= len(r.Novelty) {
+	i := int(t / r.NoveltySeconds)
+	if i >= len(r.Novelty) {
 		return 0
 	}
 	return r.Novelty[i]
+}
+
+// NoveltyTime returns the instant novelty index i describes: the centre of the
+// span it covers.
+func (r *Result) NoveltyTime(i int) float64 {
+	return (float64(i) + 0.5) * r.NoveltySeconds
 }

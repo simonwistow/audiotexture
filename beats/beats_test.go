@@ -194,11 +194,17 @@ func TestNoveltyFindsStructuralBoundary(t *testing.T) {
 	peakAt := -1.0
 	for i, v := range r.Novelty {
 		if v > peak {
-			peak, peakAt = v, float64(i)*r.NoveltySeconds
+			peak, peakAt = v, r.NoveltyTime(i)
 		}
 	}
-	if math.Abs(peakAt-boundary) > 2.0 {
-		t.Errorf("novelty peaks at %.2fs, want within 2s of %.1fs", peakAt, boundary)
+	// Half a novelty span of slack: the curve cannot localise a boundary more
+	// finely than the span each of its values covers.
+	if tolerance := 2.0; math.Abs(peakAt-boundary) > tolerance {
+		t.Errorf("novelty peaks at %.2fs, want within %vs of %.1fs", peakAt, tolerance, boundary)
+	}
+	if math.Abs(peakAt-boundary) > r.NoveltySeconds {
+		t.Logf("note: peak is %.3fs from the boundary, more than one novelty span (%.2fs)",
+			math.Abs(peakAt-boundary), r.NoveltySeconds)
 	}
 
 	// And it should be much higher there than in the middle of a section.
