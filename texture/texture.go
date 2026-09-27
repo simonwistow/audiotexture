@@ -1,6 +1,6 @@
 // Package texture implements the pluggable "texture" algorithms that decide
-// which image is shown at which moment in the output, given the source
-// images, detected beat/onset times, and the audio duration.
+// which image is shown at which moment in the output, given the source images,
+// the detected beat times, and the audio duration.
 package texture
 
 import (
@@ -9,33 +9,70 @@ import (
 )
 
 // Onset is a point in time at which the given image becomes the current one.
+// An image is shown from its Start until the next Onset's Start.
 type Onset struct {
 	Image string
 	Start float64 // seconds
 }
 
+// Input is everything an Algorithm has to work with.
+type Input struct {
+	// Images are the source image paths, in the order they should appear.
+	Images []string
+	// Beats are the detected beat times in seconds, ascending. May be empty,
+	// in which case beat-driven algorithms should fall back to even spacing.
+	Beats []float64
+	// Duration is the length of the soundtrack in seconds.
+	Duration float64
+	// FrameRate is the output frame rate. The legacy algorithm quantises to
+	// this grid, because the original Perl worked in frame numbers.
+	FrameRate float64
+	// Strength, if set, reports the onset strength at a given time. Used to
+	// prefer structurally significant beats over merely regular ones.
+	Strength func(t float64) float64
+}
+
+// strengthAt returns the onset strength at t, or 1 when no envelope is
+// available, so that callers can weight uniformly without a nil check.
+func (in Input) strengthAt(t float64) float64 {
+	if in.Strength == nil {
+		return 1
+	}
+	return in.Strength(t)
+}
+
 // Algorithm assigns images to onsets in time across the audio duration.
-// beats is the set of detected beat/onset times in seconds (empty until the
-// beat-detection stage exists); it may be ignored by algorithms that don't
-// use it.
 type Algorithm interface {
-	Assign(images []string, beats []float64, duration float64) ([]Onset, error)
+	Assign(Input) ([]Onset, error)
 }
 
-var registry = map[string]Algorithm{}
-
-func Register(name string, a Algorithm) {
-	registry[name] = a
+type registration struct {
+	algorithm   Algorithm
+	description string
 }
 
+var registry = map[string]registration{}
+
+// Register makes a under name, with a one-line description for the CLI.
+func Register(name, description string, a Algorithm) {
+	registry[name] = registration{algorithm: a, description: description}
+}
+
+// Get returns the algorithm registered under name.
 func Get(name string) (Algorithm, error) {
-	a, ok := registry[name]
+	r, ok := registry[name]
 	if !ok {
 		return nil, fmt.Errorf("unknown algorithm %q (available: %v)", name, List())
 	}
-	return a, nil
+	return r.algorithm, nil
 }
 
+// Describe returns the one-line description registered for name.
+func Describe(name string) string {
+	return registry[name].description
+}
+
+// List returns the registered algorithm names, sorted.
 func List() []string {
 	names := make([]string, 0, len(registry))
 	for name := range registry {
@@ -45,17 +82,22 @@ func List() []string {
 	return names
 }
 
-// descriptions holds a one-line summary per registered algorithm, for
-// list-algorithms and for godoc.
-var descriptions = map[string]string{}
-
-// RegisterWithDescription registers a with a summary shown by the CLI.
-func RegisterWithDescription(name, description string, a Algorithm) {
-	Register(name, a)
-	descriptions[name] = description
+// evenStarts returns n start times spread equally across duration. Several
+// algorithms use this as their starting point.
+func evenStarts(n int, duration float64) []float64 {
+	starts := make([]float64, n)
+	for i := range starts {
+		starts[i] = float64(i) * duration / float64(n)
+	}
+	return starts
 }
 
-// Describe returns the one-line summary registered for name, if any.
-func Describe(name string) string {
-	return descriptions[name]
+// onsetsFrom pairs images with start times, which must already be sorted
+// ascending and the same length as images.
+func onsetsFrom(images []string, starts []float64) []Onset {
+	onsets := make([]Onset, len(images))
+	for i, img := range images {
+		onsets[i] = Onset{Image: img, Start: starts[i]}
+	}
+	return onsets
 }

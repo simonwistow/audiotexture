@@ -31,7 +31,7 @@ func main() {
 		err = runAnalyse(os.Args[2:])
 	case "list-algorithms":
 		for _, name := range texture.List() {
-			fmt.Printf("%-10s %s\n", name, texture.Describe(name))
+			fmt.Printf("%-8s %s\n", name, texture.Describe(name))
 		}
 	case "-h", "--help", "help":
 		usage()
@@ -121,7 +121,13 @@ func runGenerate(args []string) error {
 		return fmt.Errorf("detecting beats: %w", err)
 	}
 
-	onsets, err := algo.Assign(imgs, detected.Times, duration)
+	onsets, err := algo.Assign(texture.Input{
+		Images:    imgs,
+		Beats:     detected.Times,
+		Duration:  duration,
+		FrameRate: *framerate,
+		Strength:  detected.Strength,
+	})
 	if err != nil {
 		return fmt.Errorf("running algorithm %q: %w", *algorithm, err)
 	}
