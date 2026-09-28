@@ -1,5 +1,7 @@
 # audiotexture
 
+[![test](https://github.com/simonwistow/audiotexture/actions/workflows/test.yml/badge.svg)](https://github.com/simonwistow/audiotexture/actions/workflows/test.yml)
+
 Generate beat-synced slideshow movies from a directory of images and an audio
 track. Beats are detected locally and the movie is encoded in-process — no
 external APIs, no `ffmpeg` subprocess, no intermediate frame directory.
@@ -14,23 +16,36 @@ to encode.
 
 The audio decoding and movie encoding go through
 [go-astiav](https://github.com/asticode/go-astiav), cgo bindings to libav\*, so
-**FFmpeg 8.x development libraries** are required at build time.
+**FFmpeg 8.x development libraries** are required at build time — `libavcodec`,
+`libavdevice`, `libavfilter`, `libavformat`, `libavutil`, `libswresample` and
+`libswscale` — built with an H.264 encoder (libx264) if you want to write MP4.
+The bindings are pinned to that major version of the ABI and will not build
+against 7 or 9.
 
 ```sh
-brew install ffmpeg pkg-config                                  # macOS
-apt install libavcodec-dev libavformat-dev libavutil-dev \
-            libswscale-dev libswresample-dev pkg-config         # Debian/Ubuntu
-
+brew install ffmpeg pkg-config      # macOS, if it is currently on 8.x
 go install github.com/simonwistow/audiotexture/cmd/audiotexture@latest
 ```
 
-If FFmpeg is somewhere `pkg-config` will not find, point cgo at it:
+If your package manager does not have 8.x — many still do not —
+`.github/scripts/build-ffmpeg.sh PREFIX` builds exactly what CI builds: FFmpeg
+and x264, shared, into a prefix of your choosing, with nothing installed
+system-wide. Shared rather than static because cgo asks `pkg-config` for
+`--libs` and not `--libs --static`, which would leave `-lx264` in
+`Libs.private` where the linker never looks.
+
+Then point cgo at whichever FFmpeg you want, if it is not where `pkg-config`
+looks by default:
 
 ```sh
-export PKG_CONFIG_PATH=/path/to/ffmpeg/lib/pkgconfig
-export CGO_CFLAGS=-I/path/to/ffmpeg/include
-export CGO_LDFLAGS=-L/path/to/ffmpeg/lib
+export PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig
+export CGO_CFLAGS=-I$PREFIX/include
+export CGO_LDFLAGS="-L$PREFIX/lib -Wl,-rpath,$PREFIX/lib"   # rpath: Linux only
 ```
+
+The rpath is how an ELF executable finds shared libraries outside the default
+search path; macOS dylibs carry their own absolute install name and do not
+need it.
 
 ## Use
 
@@ -287,3 +302,10 @@ uses the result to decide which beats are worth cutting on.
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+
+Worth knowing: libx264 requires FFmpeg to be configured `--enable-gpl`, which
+is what `brew install ffmpeg` and the build script here both do. This code
+stays MIT, but a binary linked against a GPL-configured FFmpeg is covered by
+the GPL when you distribute it. FFmpeg can be built with `libopenh264`
+instead if that matters to you; nothing here depends on x264 specifically,
+only on some H.264 encoder being present.

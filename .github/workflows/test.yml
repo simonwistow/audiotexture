@@ -1,0 +1,115 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # Not a floating "latest": go-astiav is pinned to one major version of the
+  # libav* ABI, and moving off it is a deliberate change to go.mod.
+  FFMPEG_VERSION: n8.0
+  X264_VERSION: stable
+
+jobs:
+  tidy:
+    name: format and tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Everything in this job is deliberately cgo-free so it reports in
+      # seconds, rather than waiting on an FFmpeg build to tell you about a
+      # stray tab.
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "needs gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go mod tidy
+        run: |
+          go mod tidy
+          if ! git diff --quiet go.mod go.sum; then
+            echo "go mod tidy changed go.mod or go.sum:"
+            git --no-pager diff go.mod go.sum
+            exit 1
+          fi
+
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The whole prefix is one cache entry, x264 included, so a hit needs
+      # nothing else installed on the runner. Hashing the build script means
+      # changing how FFmpeg is configured rebuilds it.
+      - name: Cache FFmpeg
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/ffmpeg
+          key: ffmpeg-${{ env.FFMPEG_VERSION }}-x264-${{ env.X264_VERSION }}-${{ runner.os }}-${{ hashFiles('.github/scripts/build-ffmpeg.sh') }}
+
+      - if: steps.ffmpeg-cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        name: Install assembler
+        run: sudo apt-get update && sudo apt-get install -y nasm
+
+      - if: steps.ffmpeg-cache.outputs.cache-hit != 'true' && runner.os == 'macOS'
+        name: Install assembler
+        run: brew install nasm
+
+      - if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        name: Build FFmpeg
+        run: .github/scripts/build-ffmpeg.sh "$HOME/ffmpeg"
+
+      # pkg-config is what go-astiav's cgo directive actually consults; the
+      # CGO_* variables are belt and braces.
+      - name: Point cgo at FFmpeg
+        run: |
+          prefix="$HOME/ffmpeg"
+          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "CGO_CFLAGS=-I$prefix/include" >> "$GITHUB_ENV"
+          # An ELF executable records only the SONAME of what it links, so on
+          # Linux it needs an rpath to find the shared libav* at run time.
+          # macOS dylibs carry their absolute install_name and do not, and
+          # passing one anyway only makes the linker warn about a duplicate.
+          if [ "$RUNNER_OS" = Linux ]; then
+            echo "CGO_LDFLAGS=-L$prefix/lib -Wl,-rpath,$prefix/lib" >> "$GITHUB_ENV"
+          else
+            echo "CGO_LDFLAGS=-L$prefix/lib" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race ./...
+
+      - name: build the command
+        run: go build -o audiotexture ./cmd/audiotexture
+
+      # Proof the binary links and runs, which `go build` alone does not give
+      # you for a cgo program with shared libraries behind it.
+      - name: smoke test
+        run: ./audiotexture list-algorithms
