@@ -1,6 +1,11 @@
-// Package render turns a texture.Onset assignment into output: currently a
-// directory of numbered frame files at a fixed frame rate (movie-file output
-// via ffmpeg comes later).
+// Package render writes a texture.Onset assignment out as a directory of
+// numbered frame files at a fixed frame rate.
+//
+// This is what the 2010 Perl produced, and it is kept for comparing against
+// archived frames: the files are hard links to the source images rather than
+// copies, so a whole slideshow costs almost nothing on disk. For an actual
+// movie, use the video package, which encodes in-process and needs no
+// intermediate directory.
 package render
 
 import (
