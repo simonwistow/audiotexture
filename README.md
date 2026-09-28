@@ -54,25 +54,53 @@ generate flags:
   --height     output height (default 720)
   --crf        x264 quality, lower is better (default 20)
   --preset     x264 preset (default "medium")
-  --bpm        override beat detection with a fixed tempo
-  --start-bpm  centre of the tempo prior (default 120)
-  --tightness  how strictly to hold an even beat grid (default 100)
   --quiet      suppress progress output
   --verbose    show FFmpeg's own logging
+
+tempo flags (generate and analyse both take these):
+  --bpm            skip detection and use a fixed tempo
+  --start-bpm      centre of the tempo prior (default 120)
+  --tempo-spread   width of that prior, in octaves (default 1)
+  --tempo-drift    how far the tempo may stray from the track's own (default 0.25)
+  --tempo-inertia  cost of changing tempo (default 400)
+  --tightness      how strictly to hold an even beat grid (default 100)
 ```
 
 Inspect the analysis on its own:
 
 ```sh
-audiotexture analyse --audio track.mp3          # tempo and beat count
+audiotexture analyse --audio track.mp3          # tempo, range and beat count
 audiotexture analyse --audio track.mp3 --times  # every beat time
+audiotexture analyse --audio track.mp3 --tempo  # the tracked tempo over time
 audiotexture list-algorithms
 ```
+
+### When the tempo comes out wrong
+
+Two failure modes, with different fixes.
+
+**It picks the wrong metrical level** — 160 BPM for an 80 BPM track, because
+the eighth notes are as strong in the onset envelope as the beats, and nothing
+in the audio says which level is the *beat*. Move the prior: `--start-bpm 60`
+for a track you expect to be slow, `--start-bpm 160` for one you expect to be
+fast. The prior says "people tap at around here", not "the tempo is this", so
+it only has to be on the right side. `--bpm` settles it outright.
+
+**It does not follow a tempo that moves.** `--tempo-drift` bounds how far the
+tracker may stray from the track's own tempo; raise it for a take that really
+does pull about, lower it towards 0 to insist on a metronomic grid.
+`--tempo-inertia` is the same knob from the other end: how much a *change*
+costs rather than how large a change is allowed.
+
+`--tempo` prints the curve, which is usually enough to see which of the two is
+happening.
 
 ### Reproducing the 2010 renders
 
 Verified against the surviving archive: 680 source images, eight tracks with
-their original Echo Nest analyses, and seven rendered videos.
+their original Echo Nest analyses, and seven rendered videos. The archive is
+not distributed with the repository, so the `data/` paths below are the
+author's own; the flags are the point.
 
 ```sh
 audiotexture generate --images data/input/images \
@@ -193,17 +221,47 @@ are new. Adding your own is a `texture.Register` call — see below.
 
 ### Beat detection
 
-An implementation of Ellis (2007). A mel-scaled spectral flux "onset strength"
-envelope says how much new energy appears at each instant. Its
-autocorrelation, weighted by a log-Gaussian prior over plausible tempos, gives
-one global tempo. A dynamic program then picks the beat sequence maximising
-onset strength landed on, minus a penalty for straying from that tempo.
+An implementation of Ellis (2007), with the tempo allowed to move.
 
-Solving the last step as a DP rather than greedily is the point: it finds the
-globally best sequence, so the grid holds its place through a quiet passage
-instead of latching onto whatever transient happens to be nearby.
+A mel-scaled spectral flux "onset strength" envelope says how much new energy
+appears at each instant. A dynamic program then picks the beat sequence
+maximising onset strength landed on, minus a penalty for straying from the
+expected beat period. Solving that step as a DP rather than greedily is the
+point: it finds the globally best sequence, so the grid holds its place through
+a quiet passage instead of latching onto whatever transient happens to be
+nearby.
 
-About 170 ms for a three-minute track.
+Ellis takes the beat period as one number for the whole track, from the
+autocorrelation of the entire envelope under a log-Gaussian prior over
+plausible tempos. That assumes the tempo never changes, which holds for a
+sequenced record and fails for anything played by people. So instead this
+autocorrelates eight-second windows — a *tempogram*, one column every half
+second — and decodes a path through it with a second Viterbi: each column votes
+for a period, and each step pays for changing tempo.
+
+Two details earn their keep. Each column is normalised to a peak of 1 before
+it votes, so a loud chorus does not outvote the rest of the piece. And the
+search is confined to a band 25% either side of one tempo taken from the summed
+tempogram, because a squared-change penalty is cheap to pay in many small
+steps: left unbounded, a path will happily walk from 137 BPM down to 78 and
+back over a minute, collecting whatever each passage correlates best with and
+leaving a beat grid that means a different thing in every section. A piece of
+music has one tempo, which it may wander around.
+
+Measured against the archived Echo Nest analyses of the eight tracks, at the
+standard ±70 ms tolerance, following the tempo is never worse than holding it
+fixed and is worth about 7% of F-measure on the one track that noticeably
+drifts. It does not help with the metrical level: a track whose eighth notes
+are as strong as its beats is genuinely ambiguous, and no statistic tried here
+separated it from the tracks that came out right. That is what `--start-bpm`
+is for.
+
+The sub-frame part of the period comes from the whole-track peak rather than
+from each column. One column holds a dozen beats and its correlation peak is
+correspondingly blunt; 126 BPM is lag 20.5 at the default hop, exactly between
+two frames, and a per-column parabola gets it wrong by the full 2.5%.
+
+About 200 ms for a three-minute track.
 
 ### Audio novelty
 

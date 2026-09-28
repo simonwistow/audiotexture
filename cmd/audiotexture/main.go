@@ -5,6 +5,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,9 +75,7 @@ func runGenerate(args []string) error {
 	height := fs.Int("height", video.DefaultHeight, "output height in pixels")
 	crf := fs.Int("crf", video.DefaultCRF, "x264 quality: lower is better, 18-24 is sane")
 	preset := fs.String("preset", video.DefaultPreset, "x264 preset: ultrafast ... veryslow")
-	bpm := fs.Float64("bpm", 0, "override beat detection with a fixed tempo")
-	startBPM := fs.Float64("start-bpm", beats.DefaultStartBPM, "centre of the tempo prior")
-	tightness := fs.Float64("tightness", beats.DefaultTightness, "how strictly to hold an even beat grid")
+	tempo := registerTempoFlags(fs)
 	quiet := fs.Bool("quiet", false, "suppress progress output")
 	verbose := fs.Bool("verbose", false, "show FFmpeg's own logging")
 	fs.Usage = func() {
@@ -135,11 +134,7 @@ func runGenerate(args []string) error {
 		if detected.Duration > 0 {
 			duration = detected.Duration
 		}
-	} else if detected, err = beats.Detect(pcm, &beats.Options{
-		FixedBPM:  *bpm,
-		StartBPM:  *startBPM,
-		Tightness: *tightness,
-	}); err != nil {
+	} else if detected, err = beats.Detect(pcm, tempo.options()); err != nil {
 		return fmt.Errorf("detecting beats: %w", err)
 	}
 
@@ -212,11 +207,10 @@ func runGenerate(args []string) error {
 func runAnalyse(args []string) error {
 	fs := flag.NewFlagSet("analyse", flag.ExitOnError)
 	audioPath := fs.String("audio", "", "audio file to analyse (required)")
-	bpm := fs.Float64("bpm", 0, "override beat detection with a fixed tempo")
-	startBPM := fs.Float64("start-bpm", beats.DefaultStartBPM, "centre of the tempo prior")
-	tightness := fs.Float64("tightness", beats.DefaultTightness, "how strictly to hold an even beat grid")
+	tempo := registerTempoFlags(fs)
 	beatFile := fs.String("beats", "", "read beat times from a file instead of detecting them")
 	times := fs.Bool("times", false, "print every beat time, one per line")
+	curve := fs.Bool("tempo", false, "print the tracked tempo over time, one value per line")
 	verbose := fs.Bool("verbose", false, "show FFmpeg's own logging")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -241,17 +235,25 @@ func runAnalyse(args []string) error {
 		if detected, err = beats.LoadFile(*beatFile); err != nil {
 			return err
 		}
-	} else if detected, err = beats.Detect(pcm, &beats.Options{
-		FixedBPM:  *bpm,
-		StartBPM:  *startBPM,
-		Tightness: *tightness,
-	}); err != nil {
+	} else if detected, err = beats.Detect(pcm, tempo.options()); err != nil {
 		return err
 	}
 
 	fmt.Printf("duration %s\n", formatDuration(pcm.Duration()))
 	fmt.Printf("tempo    %.2f BPM\n", detected.BPM)
 	fmt.Printf("beats    %d\n", len(detected.Times))
+	if len(detected.Tempo) > 0 {
+		lo, hi := math.Inf(1), math.Inf(-1)
+		for _, v := range detected.Tempo {
+			lo, hi = math.Min(lo, v), math.Max(hi, v)
+		}
+		fmt.Printf("range    %.2f - %.2f BPM\n", lo, hi)
+	}
+	if *curve {
+		for i, v := range detected.Tempo {
+			fmt.Printf("%.3f\t%.2f\n", float64(i)*detected.TempoSeconds, v)
+		}
+	}
 	if *times {
 		for _, t := range detected.Times {
 			fmt.Printf("%.4f\n", t)
@@ -293,4 +295,33 @@ func formatDuration(seconds float64) string {
 		return fmt.Sprintf("%dm%04.1fs", m, s)
 	}
 	return fmt.Sprintf("%.1fs", s)
+}
+
+// tempoFlags are the beat-detection knobs. Both subcommands take the same set
+// and build Options the same way, so they are defined once rather than kept in
+// step by hand.
+type tempoFlags struct {
+	bpm, startBPM, spread, tightness, drift, inertia *float64
+}
+
+func registerTempoFlags(fs *flag.FlagSet) tempoFlags {
+	return tempoFlags{
+		bpm:       fs.Float64("bpm", 0, "override beat detection with a fixed tempo"),
+		startBPM:  fs.Float64("start-bpm", beats.DefaultStartBPM, "centre of the tempo prior: move it when a track locks onto half or double time"),
+		spread:    fs.Float64("tempo-spread", beats.DefaultTempoSpread, "width of the tempo prior, in octaves"),
+		tightness: fs.Float64("tightness", beats.DefaultTightness, "how strictly to hold an even beat grid"),
+		drift:     fs.Float64("tempo-drift", beats.DefaultTempoDrift, "how far the tempo may stray from the track's own, as a fraction"),
+		inertia:   fs.Float64("tempo-inertia", beats.DefaultTempoInertia, "cost of changing tempo: raise it to insist on a steadier one"),
+	}
+}
+
+func (t tempoFlags) options() *beats.Options {
+	return &beats.Options{
+		FixedBPM:     *t.bpm,
+		StartBPM:     *t.startBPM,
+		TempoSpread:  *t.spread,
+		Tightness:    *t.tightness,
+		TempoDrift:   *t.drift,
+		TempoInertia: *t.inertia,
+	}
 }

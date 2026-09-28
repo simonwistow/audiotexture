@@ -6,6 +6,9 @@ import "math"
 // section 3: autocorrelate the onset envelope, weight the result by a
 // log-Gaussian centred on a prior tempo, and take the strongest lag.
 //
+// This is the fallback for a track too short to build a tempogram over; see
+// tempoPath. Everything longer gets a tempo that is allowed to move.
+//
 // The weighting is what stops the autocorrelation peak at twice or half the
 // real tempo from winning, which it otherwise routinely does -- a steady beat
 // correlates just as well at every metrical level. The prior encodes "people

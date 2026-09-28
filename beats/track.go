@@ -3,7 +3,7 @@ package beats
 import "math"
 
 // trackBeats finds the best sequence of beat frames through env, given a
-// target period in frames.
+// target beat period in frames for each frame of the envelope.
 //
 // This is the dynamic program from Ellis (2007) section 4. Each beat is scored
 // on two things: how much onset strength sits at that instant (the local
@@ -12,30 +12,46 @@ import "math"
 // the shape a DP solves, and it is why the result stays on the grid through a
 // passage with no percussion instead of drifting the way a greedy peak-picker
 // does.
-func trackBeats(env []float64, period float64, tightness float64) []int {
-	if len(env) == 0 || period <= 0 {
+//
+// Ellis takes the period as one number for the whole track. Here it varies
+// with time, so a take that speeds up is followed rather than averaged into a
+// grid that is wrong at both ends; period[i] is the gap the tracker expects to
+// see arriving at frame i. A constant slice gives exactly the original
+// behaviour.
+func trackBeats(env []float64, period []float64, tightness float64) []int {
+	if len(env) == 0 || len(period) != len(env) {
 		return nil
 	}
 
-	local := localScore(env, period)
-
-	// Candidate previous-beat offsets: between half and twice the period.
-	lo := int(math.Round(period / 2))
-	hi := int(math.Round(period * 2))
-	if lo < 1 {
-		lo = 1
+	median := medianPeriod(period)
+	if median <= 0 {
+		return nil
 	}
-	if hi < lo {
-		hi = lo
+	local := localScore(env, median)
+
+	// Candidate previous-beat offsets: between half and twice the period,
+	// over the whole range the tempo visits.
+	lo, hi := math.Inf(1), math.Inf(-1)
+	for _, p := range period {
+		lo = math.Min(lo, p/2)
+		hi = math.Max(hi, p*2)
+	}
+	loD, hiD := max(int(math.Round(lo)), 1), int(math.Round(hi))
+	if hiD < loD {
+		hiD = loD
 	}
 
-	// Transition cost, precomputed per offset. It peaks at exactly one period
-	// and falls off as the square of the log ratio, so being out by a factor
-	// of two costs the same whichever direction you are out by.
-	cost := make([]float64, hi+1)
-	for d := lo; d <= hi; d++ {
-		ratio := math.Log(float64(d) / period)
-		cost[d] = -tightness * ratio * ratio
+	// The transition cost peaks at exactly one period and falls off as the
+	// square of the log ratio, so being out by a factor of two costs the same
+	// whichever direction you are out by. With a varying period it cannot be
+	// precomputed per offset, but the logs can be.
+	logOffset := make([]float64, hiD+1)
+	for d := loD; d <= hiD; d++ {
+		logOffset[d] = math.Log(float64(d))
+	}
+	logPeriod := make([]float64, len(period))
+	for i, p := range period {
+		logPeriod[i] = math.Log(p)
 	}
 
 	cumulative := make([]float64, len(local))
@@ -48,13 +64,18 @@ func trackBeats(env []float64, period float64, tightness float64) []int {
 	firstBeat := true
 
 	for i := range local {
+		// Only offsets within half to twice *this* frame's period are beats.
+		near := max(int(math.Round(period[i]/2)), 1)
+		far := int(math.Round(period[i] * 2))
+
 		best, bestPrev := math.Inf(-1), -1
-		for d := lo; d <= hi; d++ {
+		for d := near; d <= far; d++ {
 			j := i - d
 			if j < 0 {
 				break
 			}
-			if s := cumulative[j] + cost[d]; s > best {
+			ratio := logOffset[d] - logPeriod[i]
+			if s := cumulative[j] - tightness*ratio*ratio; s > best {
 				best, bestPrev = s, j
 			}
 		}

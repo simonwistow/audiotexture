@@ -16,19 +16,31 @@ import (
 // beat for bpm over the given duration, over a quiet sine bed so the signal is
 // not pure silence between clicks.
 func ClickTrack(sampleRate int, duration, bpm float64) []float64 {
+	return clicksAt(sampleRate, duration, BeatTimes(duration, bpm))
+}
+
+// RampedClickTrack is ClickTrack with the tempo sweeping linearly from
+// startBPM to endBPM across the duration, for testing a tracker that is meant
+// to follow a tempo rather than average it. It returns the samples and the
+// exact click times.
+func RampedClickTrack(sampleRate int, duration, startBPM, endBPM float64) ([]float64, []float64) {
+	ts := RampedBeatTimes(duration, startBPM, endBPM)
+	return clicksAt(sampleRate, duration, ts), ts
+}
+
+// clicksAt renders an exponentially decaying noise burst at each of ts, over a
+// quiet 220 Hz bed so the signal is not pure silence between clicks.
+func clicksAt(sampleRate int, duration float64, ts []float64) []float64 {
 	n := int(duration * float64(sampleRate))
 	out := make([]float64, n)
 
-	// Quiet 220 Hz bed.
 	for i := range out {
 		out[i] = 0.02 * math.Sin(2*math.Pi*220*float64(i)/float64(sampleRate))
 	}
 
-	// Exponentially decaying noise burst at each beat.
-	period := 60.0 / bpm
 	decay := 0.012 * float64(sampleRate) // ~12 ms
 	rng := newRNG(1)
-	for t := 0.0; t < duration; t += period {
+	for _, t := range ts {
 		start := int(t * float64(sampleRate))
 		for j := 0; j < int(6*decay) && start+j < n; j++ {
 			env := math.Exp(-float64(j) / decay)
@@ -48,6 +60,18 @@ func BeatTimes(duration, bpm float64) []float64 {
 	period := 60.0 / bpm
 	for t := 0.0; t < duration; t += period {
 		ts = append(ts, t)
+	}
+	return ts
+}
+
+// RampedBeatTimes returns the click times RampedClickTrack uses: each beat
+// lasts as long as the tempo at the instant it starts, so the tempo sweeps
+// linearly in BPM with time rather than with beat number.
+func RampedBeatTimes(duration, startBPM, endBPM float64) []float64 {
+	var ts []float64
+	for t := 0.0; t < duration; {
+		ts = append(ts, t)
+		t += 60.0 / (startBPM + (endBPM-startBPM)*t/duration)
 	}
 	return ts
 }

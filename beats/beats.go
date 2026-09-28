@@ -36,6 +36,14 @@ const (
 	DefaultTightness   = 100.0
 	DefaultMinBPM      = 40.0
 	DefaultMaxBPM      = 240.0
+
+	// Tempo tracking. A window has to hold several beats to correlate at
+	// all, but the longer it is the more a real tempo change is smeared
+	// across the columns either side of it.
+	DefaultTempoWindow  = 8.0   // seconds of envelope per tempogram column
+	DefaultTempoStep    = 0.5   // seconds between tempogram columns
+	DefaultTempoInertia = 400.0 // cost of changing tempo, per squared octave
+	DefaultTempoDrift   = 0.25  // how far the tempo may stray from the track's own
 )
 
 // Options tunes detection. The zero value is usable: every field falls back to
@@ -59,6 +67,20 @@ type Options struct {
 
 	// MinBPM and MaxBPM bound the tempo search.
 	MinBPM, MaxBPM float64
+
+	// TempoWindow and TempoStep set the tempogram: how much onset envelope
+	// each column autocorrelates and how far apart the columns sit, both in
+	// seconds. TempoInertia is what it costs to change tempo between two
+	// columns, per squared octave -- raise it to insist on a steadier tempo,
+	// lower it to follow a track that really does speed up and slow down.
+	TempoWindow, TempoStep, TempoInertia float64
+
+	// TempoDrift bounds how far the tracked tempo may stray from the one
+	// tempo found for the track as a whole, as a fraction: 0.25 allows a
+	// quarter either way. It is what stops the tracker following a piece
+	// into half or double time and leaving a beat grid that means something
+	// different in each section.
+	TempoDrift float64
 
 	// Tightness is how strongly the tracker insists on an even spacing.
 	// Higher keeps a stricter grid; lower follows the audio more closely.
@@ -97,12 +119,33 @@ func (o *Options) applyDefaults() {
 	if o.Tightness <= 0 {
 		o.Tightness = DefaultTightness
 	}
+	if o.TempoWindow <= 0 {
+		o.TempoWindow = DefaultTempoWindow
+	}
+	if o.TempoStep <= 0 {
+		o.TempoStep = DefaultTempoStep
+	}
+	if o.TempoInertia <= 0 {
+		o.TempoInertia = DefaultTempoInertia
+	}
+	if o.TempoDrift <= 0 {
+		o.TempoDrift = DefaultTempoDrift
+	}
 }
 
 // Result is what Detect found.
 type Result struct {
-	// BPM is the estimated global tempo.
+	// BPM is the estimated tempo of the track as a whole: the median of
+	// Tempo when there is one, since a few columns over an intro or a
+	// breakdown should not move the headline figure.
 	BPM float64
+
+	// Tempo is the tracked tempo in BPM, one value per TempoSeconds. Empty
+	// when the tempo was fixed, or the track too short to window, in which
+	// case BPM holds for the whole of it.
+	Tempo []float64
+	// TempoSeconds is the time between consecutive Tempo values.
+	TempoSeconds float64
 	// Times are the detected beat instants, in seconds, ascending.
 	Times []float64
 	// Onset is the onset strength envelope, one value per hop. Exposed
@@ -163,13 +206,9 @@ func Detect(pcm *audio.PCM, opts *Options) (*Result, error) {
 	}
 	hopSeconds := float64(o.HopSize) / float64(pcm.SampleRate)
 
-	bpm := o.FixedBPM
-	if bpm <= 0 {
-		bpm, _ = estimateTempo(env, hopSeconds, &o)
-	}
-
-	period := 60.0 / (bpm * hopSeconds) // beat period in frames
-	frames := trackBeats(env, period, o.Tightness)
+	periods, curve, curveSeconds := tempoPath(env, hopSeconds, &o)
+	bpm := 60.0 / (medianPeriod(periods) * hopSeconds)
+	frames := trackBeats(env, periods, o.Tightness)
 
 	times := make([]float64, len(frames))
 	for i, f := range frames {
@@ -178,6 +217,8 @@ func Detect(pcm *audio.PCM, opts *Options) (*Result, error) {
 
 	return &Result{
 		BPM:            bpm,
+		Tempo:          curve,
+		TempoSeconds:   curveSeconds,
 		Times:          times,
 		Onset:          env,
 		HopSeconds:     hopSeconds,
