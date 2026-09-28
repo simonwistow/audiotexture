@@ -76,6 +76,8 @@ type decoder struct {
 	resampled *astiav.Frame
 
 	out []float64
+	// corrupt counts packets the decoder refused outright.
+	corrupt int
 }
 
 func (d *decoder) open() error {
@@ -184,7 +186,13 @@ func (d *decoder) sendPacket() error {
 		return nil
 	}
 	if err := d.cc.SendPacket(d.pkt); err != nil {
-		return fmt.Errorf("sending packet to decoder: %w", err)
+		// A malformed frame is not a reason to abandon the file. Real-world
+		// MP3s contain them -- ffmpeg logs "Error submitting packet to
+		// decoder" and carries on -- and one bad frame in a four-minute track
+		// is inaudible. Skip it and keep going; if the whole file is
+		// unreadable, Decode still fails on having produced no samples.
+		d.corrupt++
+		return nil
 	}
 	return d.receiveFrames()
 }

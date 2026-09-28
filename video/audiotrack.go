@@ -37,6 +37,8 @@ type audioTrack struct {
 
 	inputDone bool
 	done      bool
+	// corrupt counts packets the decoder refused outright.
+	corrupt int
 }
 
 // newAudioTrack opens path and prepares it for encoding with enc.
@@ -243,7 +245,10 @@ func (t *audioTrack) handlePacket() error {
 		return nil
 	}
 	if err := t.dec.SendPacket(t.pkt); err != nil {
-		return fmt.Errorf("sending audio packet to decoder: %w", err)
+		// Skip malformed frames rather than abandoning the soundtrack; see
+		// the same decision in package audio.
+		t.corrupt++
+		return nil
 	}
 	return t.receive()
 }
