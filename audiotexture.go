@@ -36,11 +36,22 @@ type Options struct {
 	// reproducing a render from beat times captured elsewhere.
 	Beats []float64
 
+	// Duration overrides the decoded audio length as the span the images are
+	// spread across. Set it when reproducing a render whose beat times came
+	// with a duration of their own, since spacing is computed from it and a
+	// difference of a few tens of milliseconds moves every onset.
+	Duration float64
+
 	// BeatOptions tunes detection when Beats is nil.
 	BeatOptions *beats.Options
 
 	// Video configures the output file.
 	Video video.Options
+
+	// Reproduce2010 replays the original Perl's frame loop, including its
+	// bugs, so that a render matches the 2010 videos frame for frame. See
+	// texture.LegacyFrameSequence. Only meaningful with Algorithm "legacy".
+	Reproduce2010 bool
 }
 
 // Result reports what Generate did.
@@ -73,6 +84,9 @@ func Generate(imagesDir, audioPath, outPath string, opts Options) (*Result, erro
 		return nil, err
 	}
 	duration := pcm.Duration()
+	if opts.Duration > 0 {
+		duration = opts.Duration
+	}
 
 	detected := &beats.Result{Times: opts.Beats}
 	if opts.Beats == nil {
@@ -96,6 +110,10 @@ func Generate(imagesDir, audioPath, outPath string, opts Options) (*Result, erro
 	})
 	if err != nil {
 		return nil, fmt.Errorf("running algorithm %q: %w", opts.Algorithm, err)
+	}
+
+	if opts.Reproduce2010 {
+		onsets, duration = texture.LegacyFrameSequence(onsets, duration, frameRate)
 	}
 
 	if err := video.Encode(outPath, onsets, audioPath, duration, opts.Video); err != nil {

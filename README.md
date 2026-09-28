@@ -69,32 +69,69 @@ audiotexture analyse --audio track.mp3 --times  # every beat time
 audiotexture list-algorithms
 ```
 
-### Reproducing a render from 2010
+### Reproducing the 2010 renders
 
-Two things have to match to get the old timings back: the algorithm and the
-beat times. `--algorithm legacy` covers the first — it is a verified port of
-the original, checked against the Perl across 27 scenarios.
-
-The beats are harder, because the Echo Nest API is gone and no local detector
-will agree with it beat for beat. But the original *cached* its results in a
-`.txt` file next to each track:
-
-```
-beats(track.mp3) provided by echonest.com
-dur=213.44
-0.24812,0.72331,1.19424,...
-```
-
-If any of those sidecars survived, feed one straight back in and the timings
-are exact:
+Verified against the surviving archive: 680 source images, eight tracks with
+their original Echo Nest analyses, and seven rendered videos.
 
 ```sh
-audiotexture generate --images ./pix --audio track.mp3 \
-    --beats track.txt --algorithm legacy --framerate 24 --out movie.mp4
+audiotexture generate --images data/input/images \
+    --audio data/input/songs/creep/creep.mp3 \
+    --beats data/input/songs/creep/creep.txt \
+    --algorithm legacy --reproduce-2010 --framerate 24 \
+    --out creep.mp4
 ```
 
-`--frames` reproduces the original's actual output — a directory of
-`%06d.ext` hardlinks — if you want to diff against archived frames.
+Three things have to line up, and only the first is obvious.
+
+**The beat times.** The Echo Nest API is gone and no local detector will agree
+with it beat for beat, but the original cached every analysis in a `.txt`
+sidecar next to the track. `--beats` reads that format directly.
+
+**The duration.** The sidecar's `dur=` line and a local MP3 decode disagree by
+around 80 ms. Since the algorithm spreads the images across the duration, using
+the wrong one shifts every onset — enough to change the rendered frame count.
+`--beats` takes the duration from the file that supplied the beats.
+
+**The frame loop.** `--reproduce-2010` replays the original's frame-emitting
+loop, which does not do what its own algorithm computed. Three bugs, all
+present in every surviving video: the first image is never shown, the movie
+ends at the last onset rather than at the end of the audio, and an image can be
+skipped when two onsets land within a frame of each other. Without this the
+output is only about 2% frame-identical to the original; with it, exact.
+
+Leave `--reproduce-2010` off for new work — then every image is shown, starting
+with the first, and the movie lasts as long as the music.
+
+`--frames` reproduces the original's actual output, a directory of `%06d.ext`
+hardlinks, for diffing against archived frames.
+
+#### What was checked
+
+`internal/cmd/verify` decodes each original video and compares it, frame by
+frame, against what this implementation predicts.
+
+| Check | Result |
+|-------|--------|
+| Frame count | exact on all 7 videos |
+| Cuts predicted but absent from the original | 0 |
+| Cuts in the original not predicted | 0 |
+| Frames showing the predicted image | 99.2–99.5% |
+
+The residual is the image matcher, not the algorithm. Many of the 680
+photographs are consecutive frames of a stop-motion sequence and are nearly
+identical, so a thumbnail comparison cannot always tell which of an adjacent
+pair is on screen. Allowing for that, 99.7–99.8% of frames show an image
+indistinguishable from the predicted one, and the cut positions — what the
+algorithm actually decides — agree exactly.
+
+#### A trap worth knowing about
+
+The source JPEGs carry an EXIF orientation tag of 8, which says to rotate them
+90°. That tag is wrong: the stored pixels are already the right way up, and
+applying it turns every frame on its side. The 2010 Perl ignored EXIF, and Go's
+`image/jpeg` ignores it too, so this implementation matches. Anything that
+honours EXIF — `ffmpeg`, most image viewers — will show these images rotated.
 
 ## Library
 

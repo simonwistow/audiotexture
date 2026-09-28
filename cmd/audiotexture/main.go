@@ -67,6 +67,7 @@ func runGenerate(args []string) error {
 	outPath := fs.String("out", "", "output movie file")
 	framesDir := fs.String("frames", "", "also write numbered frames here, as the original Perl did")
 	beatFile := fs.String("beats", "", "read beat times from a file instead of detecting them")
+	reproduce := fs.Bool("reproduce-2010", false, "reproduce the original Perl's frame loop, bugs and all")
 	algorithm := fs.String("algorithm", "legacy", "texture algorithm (see list-algorithms)")
 	framerate := fs.Float64("framerate", video.DefaultFrameRate, "output frame rate")
 	width := fs.Int("width", video.DefaultWidth, "output width in pixels")
@@ -125,6 +126,15 @@ func runGenerate(args []string) error {
 		if detected, err = beats.LoadFile(*beatFile); err != nil {
 			return err
 		}
+		// Prefer the duration the beat file records over the one decoding the
+		// audio reports. They differ by a fraction of a second -- the archived
+		// Echo Nest analyses disagree with a local MP3 decode by around 80ms
+		// -- and since the algorithm spaces images across the duration, using
+		// the other one shifts every onset and changes the output. The file
+		// that supplied the beats also supplied the duration they go with.
+		if detected.Duration > 0 {
+			duration = detected.Duration
+		}
 	} else if detected, err = beats.Detect(pcm, &beats.Options{
 		FixedBPM:  *bpm,
 		StartBPM:  *startBPM,
@@ -152,6 +162,14 @@ func runGenerate(args []string) error {
 		}
 		fmt.Printf("%d images, %s of audio, %d beats %s at %.1f BPM, %s algorithm\n",
 			len(imgs), formatDuration(duration), len(detected.Times), source, detected.BPM, *algorithm)
+	}
+
+	if *reproduce {
+		onsets, duration = texture.LegacyFrameSequence(onsets, duration, *framerate)
+		if !*quiet {
+			fmt.Printf("reproducing the 2010 frame loop: %d images shown, %s of video\n",
+				len(onsets), formatDuration(duration))
+		}
 	}
 
 	if *framesDir != "" {
