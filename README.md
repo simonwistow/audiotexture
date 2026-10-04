@@ -122,7 +122,7 @@ audiotexture list-algorithms
 
 ### When the tempo comes out wrong
 
-Two failure modes, with different fixes.
+The BPM detection has two failure modes, both with different fixes.
 
 **It picks the wrong metrical level** — 160 BPM for an 80 BPM track, because
 the eighth notes are as strong in the onset envelope as the beats, and nothing
@@ -142,10 +142,17 @@ happening.
 
 ### Reproducing the 2010 renders
 
-Verified against the surviving archive: 680 source images, eight tracks with
-their original Echo Nest analyses, and seven rendered videos. The archive is
-not distributed with the repository, so the `data/` paths below are the
-author's own; the flags are the point.
+The 2010 Perl script had a certain rugged charm but was also written in
+during a bout of insomnia and had several bugs and very few comments.
+
+That said I did find the original code in an old backup: 680 source images,
+eight tracks with their original Echo Nest analyses, and seven rendered videos.
+
+That made things easier to test against by making this version bug compatible. I
+then fixed the bugs but you can, if you'd like, reproduce the original.
+
+The archive is not distributed with the repository, so the `data/` paths below
+are for example purposes only - it's really about the flags.
 
 ```sh
 audiotexture generate --images data/input/images \
@@ -161,25 +168,27 @@ Three things have to line up, and only the first is obvious.
 with it beat for beat, but the original cached every analysis in a `.txt`
 sidecar next to the track. `--beats` reads that format directly.
 
-**The duration.** The sidecar's `dur=` line and a local MP3 decode disagree by
+**The duration.** The beats file's `dur=` line and a local MP3 decode disagree by
 around 80 ms. Since the algorithm spreads the images across the duration, using
 the wrong one shifts every onset — enough to change the rendered frame count.
 `--beats` takes the duration from the file that supplied the beats.
 
 **The frame loop.** `--reproduce-2010` replays the original's frame-emitting
-loop, which does not do what its own algorithm computed. Three bugs, all
-present in every surviving video: the first image is never shown, the movie
-ends at the last onset rather than at the end of the audio, and an image can be
-skipped when two onsets land within a frame of each other. Without this the
-output is only about 2% frame-identical to the original; with it, exact.
+loop, which does not do what its own algorithm computed. This caused three bugs:
 
-Leave `--reproduce-2010` off for new work — then every image is shown, starting
+1. The first image is never shown
+2. The movie ends at the last onset rather than at the end of the audio
+3. An image can be skipped when two onsets land within a frame of each other.
+
+Without this the output is only about 2% frame-identical to the original. With it, it's exact.
+
+You should always leave `--reproduce-2010` off for new work — then every image is shown, starting
 with the first, and the movie lasts as long as the music.
 
-`--frames` reproduces the original's actual output, a directory of `%06d.ext`
-hardlinks, for diffing against archived frames.
+`--frames` reproduces the original's actual output, a directory of `%06d.{ext}`
+hardlinks, for diffing against archived frames or feeding into something else.
 
-#### What was checked
+#### The verification process
 
 `internal/cmd/verify` decodes each original video and compares it, frame by
 frame, against what this implementation predicts.
@@ -195,16 +204,8 @@ The residual is the image matcher, not the algorithm. Many of the 680
 photographs are consecutive frames of a stop-motion sequence and are nearly
 identical, so a thumbnail comparison cannot always tell which of an adjacent
 pair is on screen. Allowing for that, 99.7–99.8% of frames show an image
-indistinguishable from the predicted one, and the cut positions — what the
-algorithm actually decides — agree exactly.
-
-#### A trap worth knowing about
-
-The source JPEGs carry an EXIF orientation tag of 8, which says to rotate them
-90°. That tag is wrong: the stored pixels are already the right way up, and
-applying it turns every frame on its side. The 2010 Perl ignored EXIF, and Go's
-`image/jpeg` ignores it too, so this implementation matches. Anything that
-honours EXIF — `ffmpeg`, most image viewers — will show these images rotated.
+indistinguishable from the predicted one, and the cut positions (what the
+algorithm actually decides) agree exactly.
 
 ## Library
 
