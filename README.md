@@ -207,6 +207,30 @@ pair is on screen. Allowing for that, 99.7–99.8% of frames show an image
 indistinguishable from the predicted one, and the cut positions (what the
 algorithm actually decides) agree exactly.
 
+## Formats supported
+
+**Images:** JPEG, PNG, GIF, TIFF, BMP and WebP (`.jpg`, `.jpeg`, `.png`,
+`.gif`, `.tif`, `.tiff`, `.bmp`, `.webp`, in any letter case). Other files in
+the directory are skipped. Images are decoded by Go's own image packages, not
+FFmpeg, so this list is the same everywhere. The EXIF orientation tag is
+ignored, as it was in 2010.
+
+**Audio:** anything your FFmpeg build can decode, which in practice means MP3,
+AAC/M4A, FLAC, Ogg Vorbis, Opus and WAV. It is downmixed to mono for beat
+detection; the soundtrack in the movie keeps its channels.
+
+**Output:** H.264 video (libx264 if it is available, otherwise whichever H.264
+encoder FFmpeg has) with AAC audio. The container is chosen from the `--out`
+file extension. Use `.mp4`. `.mov` and `.mkv` take the same codecs and should
+also work, but `.webm` will not, because WebM does not allow H.264. `--frames`
+writes each frame as a numbered hard link to, or copy of, its source image,
+so frames keep the source image's format.
+
+**Beat files** (`--beats`): plain text. Either the original Echo Nest sidecar
+(a comment line, a `dur=` line, then comma-separated beat times), or just beat
+times in seconds, one per line or separated by commas or spaces. Blank lines
+and lines starting with `#` are ignored.
+
 ## Library
 
 ```go
