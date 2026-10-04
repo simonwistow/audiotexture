@@ -22,25 +22,55 @@ The audio decoding and movie encoding go through
 The bindings are pinned to that major version of the ABI and will not build
 against 7 or 9.
 
+Check what you have with `pkg-config --modversion libavcodec`: FFmpeg 8.x
+reports `62.x`, and 7.x reports `61.x`.
+
+### macOS
+
 ```sh
-brew install ffmpeg pkg-config      # macOS, if it is currently on 8.x
+brew install ffmpeg pkg-config      # if Homebrew is currently on 8.x
 go install github.com/simonwistow/audiotexture/cmd/audiotexture@latest
 ```
 
-If your package manager does not have 8.x — many still do not —
+### Fedora
+
+RPM Fusion's `ffmpeg-devel` has the headers and libraries, but check its
+version first; if it is not 8.x, build FFmpeg as below.
+
+```sh
+sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
+                 https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+sudo dnf install ffmpeg-devel pkgconfig
+go install github.com/simonwistow/audiotexture/cmd/audiotexture@latest
+```
+
+### Ubuntu, Debian and anything else without FFmpeg 8
+
+Distribution packages are still on 6.x or 7.x, so build FFmpeg yourself.
 `.github/scripts/build-ffmpeg.sh PREFIX` builds exactly what CI builds: FFmpeg
 and x264, shared, into a prefix of your choosing, with nothing installed
 system-wide. Shared rather than static because cgo asks `pkg-config` for
 `--libs` and not `--libs --static`, which would leave `-lx264` in
 `Libs.private` where the linker never looks.
 
-Then point cgo at whichever FFmpeg you want, if it is not where `pkg-config`
-looks by default:
+```sh
+sudo apt update
+sudo apt install build-essential git nasm pkg-config    # dnf: gcc make git nasm pkgconfig
+
+git clone https://github.com/simonwistow/audiotexture.git
+cd audiotexture
+PREFIX=$HOME/ffmpeg
+.github/scripts/build-ffmpeg.sh $PREFIX
+```
+
+Then point cgo at that FFmpeg, since it is not where `pkg-config` looks by
+default, and install:
 
 ```sh
 export PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig
 export CGO_CFLAGS=-I$PREFIX/include
 export CGO_LDFLAGS="-L$PREFIX/lib -Wl,-rpath,$PREFIX/lib"   # rpath: Linux only
+go install ./cmd/audiotexture
 ```
 
 The rpath is how an ELF executable finds shared libraries outside the default
