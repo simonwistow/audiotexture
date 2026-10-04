@@ -10,8 +10,9 @@ import (
 )
 
 // Decode hands back one channel of samples in [-1, 1], resampled to whatever
-// rate the analysis wants. Any format the local FFmpeg can read works the same
-// way: mp3, m4a, flac, ogg, wav.
+// rate the analysis wants. It reads from any io.ReadSeeker -- an *os.File, a
+// bytes.Reader, an io.SectionReader into an archive -- and any format the
+// local FFmpeg can read works the same way: mp3, m4a, flac, ogg, wav.
 func ExampleDecode() {
 	dir, err := os.MkdirTemp("", "audio")
 	if err != nil {
@@ -24,9 +25,14 @@ func ExampleDecode() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	f, err := os.Open(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
 
 	// 0 means the default analysis rate. Pass an explicit rate to override it.
-	pcm, err := audio.Decode(path, 22050)
+	pcm, err := audio.Decode(f, 22050)
 	if err != nil {
 		log.Fatal(err)
 	}

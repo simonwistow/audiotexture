@@ -24,11 +24,12 @@ func main() {
 	frameRate := flag.Float64("framerate", 24, "frame rate the originals were rendered at")
 	flag.Parse()
 
-	imgs, err := images.Load(*imagesDir)
+	src, err := images.FromDir(*imagesDir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+	imgs := src.Names()
 	fmt.Printf("%d source images, %s .. %s\n\n",
 		len(imgs), filepath.Base(imgs[0]), filepath.Base(imgs[len(imgs)-1]))
 
@@ -56,8 +57,7 @@ func main() {
 			continue
 		}
 
-		algo, _ := texture.Get("legacy")
-		onsets, err := algo.Assign(texture.Input{
+		onsets, err := texture.Legacy.Assign(texture.Input{
 			Images:    imgs,
 			Beats:     r.Times,
 			Duration:  r.Duration,
@@ -77,7 +77,7 @@ func main() {
 		fmt.Printf("%-22s %8d %7.1f %8d %9d %9d\n",
 			name, len(r.Times), r.Duration, len(onsets), len(predicted), predicted[len(predicted)-1])
 		if *compareFrames {
-			compare(name, filepath.Join(*originalsDir, name+".avi"), shifted, imgs)
+			compare(name, filepath.Join(*originalsDir, name+".avi"), shifted, src)
 		}
 	}
 }
@@ -95,14 +95,14 @@ func main() {
 // Cuts: where the image changes. This compares each frame to its predecessor
 // rather than to a library, so it is immune to near-duplicate confusion, and
 // it is the thing the algorithm actually decides.
-func compare(name, aviPath string, predicted []int, imgs []string) {
+func compare(name, aviPath string, predicted []int, src images.Images) {
 	if _, err := os.Stat(aviPath); err != nil {
 		fmt.Printf("  (no original movie to compare against)\n")
 		return
 	}
 	if sourceHashes == nil {
 		var err error
-		if sourceHashes, err = hashSources(imgs); err != nil {
+		if sourceHashes, err = hashSources(src); err != nil {
 			fmt.Printf("  ERROR hashing sources: %v\n", err)
 			return
 		}

@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/simonwistow/audiotexture/images"
 )
@@ -24,10 +25,10 @@ func writeSolidPNG(dir, name string) error {
 	return png.Encode(f, img)
 }
 
-// Load returns images in lexical filename order, which is deliberately not
+// FromDir lists images in lexical filename order, which is deliberately not
 // numeric order: "10.png" sorts before "2.png". Zero-pad names, or accept the
 // sequence the sort gives you.
-func ExampleLoad() {
+func ExampleFromDir() {
 	dir, err := os.MkdirTemp("", "slideshow")
 	if err != nil {
 		log.Fatal(err)
@@ -45,15 +46,49 @@ func ExampleLoad() {
 		log.Fatal(err)
 	}
 
-	paths, err := images.Load(dir)
+	src, err := images.FromDir(dir)
 	if err != nil {
 		log.Fatal(err)
 	}
-	for _, p := range paths {
-		fmt.Println(filepath.Base(p))
+	for _, name := range src.Names() {
+		fmt.Println(name)
 	}
 	// Output:
 	// 1.png
 	// 10.png
 	// 2.png
+}
+
+// reversed shows the Images interface used for an order of your own: here the
+// same pictures, last first. Anything with Names and Image will do.
+type reversed struct{ images.Images }
+
+func (r reversed) Names() []string {
+	names := r.Images.Names()
+	slices.Reverse(names)
+	return names
+}
+
+// Implement Images to choose the order yourself, or to supply pictures from
+// somewhere other than a directory.
+func ExampleImages() {
+	dir, err := os.MkdirTemp("", "slideshow")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	for _, name := range []string{"a.png", "b.png", "c.png"} {
+		if err := writeSolidPNG(dir, name); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	src, err := images.FromDir(dir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var imgs images.Images = reversed{src}
+	fmt.Println(imgs.Names())
+	// Output:
+	// [c.png b.png a.png]
 }

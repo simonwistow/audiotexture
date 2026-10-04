@@ -9,17 +9,18 @@ import (
 	"github.com/simonwistow/audiotexture/texture"
 )
 
+// sourceImages writes n one-byte files into dir and returns their names.
 func sourceImages(t *testing.T, dir string, n int) []string {
 	t.Helper()
-	var paths []string
+	var names []string
 	for i := range n {
-		p := filepath.Join(dir, string(rune('a'+i))+".png")
-		if err := os.WriteFile(p, []byte{byte(i)}, 0o644); err != nil {
-			t.Fatalf("writing %s: %v", p, err)
+		name := string(rune('a'+i)) + ".png"
+		if err := os.WriteFile(filepath.Join(dir, name), []byte{byte(i)}, 0o644); err != nil {
+			t.Fatalf("writing %s: %v", name, err)
 		}
-		paths = append(paths, p)
+		names = append(names, name)
 	}
-	return paths
+	return names
 }
 
 func TestFrameDirectory(t *testing.T) {
@@ -33,7 +34,7 @@ func TestFrameDirectory(t *testing.T) {
 		{Image: imgs[2], Start: 2},
 	}
 
-	n, err := render.FrameDirectory(out, onsets, 3, 10)
+	n, err := render.FrameDirectory(out, src, onsets, 3, 10)
 	if err != nil {
 		t.Fatalf("FrameDirectory: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestFrameDirectoryClearsOnlyItsOwn(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "frames")
 	imgs := sourceImages(t, src, 2)
 
-	if _, err := render.FrameDirectory(out, []texture.Onset{{Image: imgs[0]}}, 5, 10); err != nil {
+	if _, err := render.FrameDirectory(out, src, []texture.Onset{{Image: imgs[0]}}, 5, 10); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
 	keep := filepath.Join(out, "notes.txt")
@@ -78,7 +79,7 @@ func TestFrameDirectoryClearsOnlyItsOwn(t *testing.T) {
 	}
 
 	// A shorter second run must not leave the first run's tail behind.
-	n, err := render.FrameDirectory(out, []texture.Onset{{Image: imgs[1]}}, 1, 10)
+	n, err := render.FrameDirectory(out, src, []texture.Onset{{Image: imgs[1]}}, 1, 10)
 	if err != nil {
 		t.Fatalf("second run: %v", err)
 	}
@@ -95,11 +96,11 @@ func TestFrameDirectoryClearsOnlyItsOwn(t *testing.T) {
 }
 
 func TestFrameDirectoryErrors(t *testing.T) {
-	if _, err := render.FrameDirectory(t.TempDir(), nil, 1, 10); err == nil {
+	if _, err := render.FrameDirectory(t.TempDir(), t.TempDir(), nil, 1, 10); err == nil {
 		t.Error("expected an error for no onsets")
 	}
 	out := filepath.Join(t.TempDir(), "frames")
-	if _, err := render.FrameDirectory(out, []texture.Onset{{Image: "/nonexistent/x.png"}}, 1, 10); err == nil {
+	if _, err := render.FrameDirectory(out, t.TempDir(), []texture.Onset{{Image: "x.png"}}, 1, 10); err == nil {
 		t.Error("expected an error for a missing source image")
 	}
 }

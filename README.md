@@ -236,29 +236,67 @@ and lines starting with `#` are ignored.
 ```go
 import "github.com/simonwistow/audiotexture"
 
-res, err := audiotexture.Generate("./pix", "track.mp3", "movie.mp4", audiotexture.Options{
-    Algorithm: "legacy",
+res, err := audiotexture.GenerateFiles("./pix", "track.mp3", "movie.mp4", audiotexture.Options{
+    Algorithm: texture.Bars,
     Video:     video.Options{Width: 1920, Height: 1080},
 })
 ```
+
+`GenerateFiles` is the convenience form. Underneath it, `Generate` takes
+interfaces rather than paths, so none of the three has to be a file:
+
+```go
+func Generate(imgs images.Images, track io.ReadSeeker, out io.WriteSeeker, opts Options) (*Result, error)
+```
+
+- **Images** are an `images.Images`: the image names, in order, and a way to
+  decode each one. `images.FromFS` lists the images in any `fs.FS` (a
+  directory, an `embed.FS`, a zip file) in lexical filename order. Implement
+  the interface yourself to choose a different order or to supply images from
+  somewhere else. Each image is decoded only when it comes on screen, so they
+  are never all in memory at once.
+- **The soundtrack** is any `io.ReadSeeker`. It is read twice, once for beat
+  detection and once for encoding, and each time from its start. The format
+  is detected from the content.
+- **The output** is any `io.WriteSeeker`. It has to seek because the muxer
+  goes back to fill in the header once it knows what the file holds. There is
+  no file name to guess the container from, so `video.Options.Format` names it
+  (default `"mp4"`). When the writer is an `*os.File` positioned at its start,
+  an MP4 also gets its index moved to the front (faststart) so it can play
+  before it has finished downloading. FFmpeg does that by reopening the file
+  by name, which other writers don't have, so for those the index stays at
+  the end. That is fine for playing a local file but slower to start
+  streaming.
 
 The pipeline is four decoupled packages, each usable on its own:
 
 | Package   | Does                                                     |
 |-----------|----------------------------------------------------------|
-| `audio`   | decode any FFmpeg-supported audio file to mono PCM        |
+| `audio`   | decode any FFmpeg-supported audio to mono PCM             |
 | `beats`   | onset detection, tempo estimation, beat tracking          |
 | `texture` | assign images to onset times (pluggable algorithms)       |
 | `video`   | encode the assignment plus the audio into a movie         |
 
-Adding an algorithm is a `texture.Register` call in an `init`:
+`Options.Algorithm` takes the algorithm itself, a `texture.Algorithm`, rather
+than its name. The built-ins are `texture.Even`, `texture.Legacy` (the
+default), `texture.Optimal`, `texture.Novelty` and `texture.Bars`. Your own is
+anything with an `Assign` method:
+
+```go
+type myAlgorithm struct{}
+
+func (myAlgorithm) Assign(in texture.Input) ([]texture.Onset, error) { ... }
+
+res, err := audiotexture.Generate(imgs, track, out, audiotexture.Options{Algorithm: myAlgorithm{}})
+```
+
+To make it selectable by name as well, with `--algorithm` or from a config
+file, register it in an `init`. `texture.Get` then looks it up:
 
 ```go
 func init() {
     texture.Register("mine", "one-line description", myAlgorithm{})
 }
-
-func (myAlgorithm) Assign(in texture.Input) ([]texture.Onset, error) { ... }
 ```
 
 ## Algorithms
@@ -285,7 +323,8 @@ func (myAlgorithm) Assign(in texture.Input) ([]texture.Onset, error) { ... }
   deliberate in a way near-even spacing does not.
 
 `even` and `legacy` reproduce old behaviour; `optimal`, `novelty` and `bars`
-are new. Adding your own is a `texture.Register` call — see below.
+are new. In Go, each is the value of the same name in `texture`, such as
+`texture.Bars`. To add your own, see [Library](#library) above.
 
 ## How the analysis works
 

@@ -6,7 +6,7 @@ import (
 )
 
 func init() {
-	Register("legacy", "the 2010 Perl algorithm: even spacing snapped to nearby beats", legacyAlgorithm{})
+	Register("legacy", "the 2010 Perl algorithm: even spacing snapped to nearby beats", Legacy)
 }
 
 // legacyAlgorithm is a port of the original slideshow.pl.
@@ -27,6 +27,8 @@ func init() {
 // written to emit numbered frame files and thought in frame numbers
 // throughout. That quantisation is part of the behaviour, not an accident.
 type legacyAlgorithm struct{}
+
+func (legacyAlgorithm) String() string { return "legacy" }
 
 func (legacyAlgorithm) Assign(in Input) ([]Onset, error) {
 	n := len(in.Images)

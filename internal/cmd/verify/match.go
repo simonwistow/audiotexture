@@ -53,10 +53,11 @@ func distance(a, b imageHash) float64 {
 }
 
 // hashSources hashes every source image once.
-func hashSources(paths []string) ([]imageHash, error) {
-	out := make([]imageHash, len(paths))
-	for i, p := range paths {
-		img, err := images.Decode(p)
+func hashSources(src images.Images) ([]imageHash, error) {
+	names := src.Names()
+	out := make([]imageHash, len(names))
+	for i, name := range names {
+		img, err := src.Image(name)
 		if err != nil {
 			return nil, err
 		}

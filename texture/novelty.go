@@ -3,7 +3,7 @@ package texture
 import "fmt"
 
 func init() {
-	Register("novelty", "cut on structural boundaries: beats weighted by audio novelty", noveltyAlgorithm{})
+	Register("novelty", "cut on structural boundaries: beats weighted by audio novelty", Novelty)
 }
 
 // noveltyWeight scales the novelty curve's pull relative to an ordinary beat.
@@ -31,6 +31,8 @@ const noveltyWeight = 3.0
 // With no novelty curve available -- beats loaded from a file, say -- this
 // degrades to the optimal algorithm rather than failing.
 type noveltyAlgorithm struct{}
+
+func (noveltyAlgorithm) String() string { return "novelty" }
 
 func (noveltyAlgorithm) Assign(in Input) ([]Onset, error) {
 	if len(in.Images) == 0 {

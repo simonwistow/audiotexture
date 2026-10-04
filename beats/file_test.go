@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/simonwistow/audiotexture/beats"
@@ -88,5 +89,16 @@ func TestLoadFileMedianBPM(t *testing.T) {
 	}
 	if math.Abs(r.BPM-120) > 1e-6 {
 		t.Errorf("BPM = %v, want 120 despite the 6.5s gap", r.BPM)
+	}
+}
+
+// TestLoadReader checks Load takes any reader, not only a file.
+func TestLoadReader(t *testing.T) {
+	r, err := beats.Load(strings.NewReader("dur=3.0\n0.5,1.0,1.5\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(r.Times) != 3 || r.Duration != 3.0 {
+		t.Errorf("got %d beats over %vs, want 3 over 3s", len(r.Times), r.Duration)
 	}
 }

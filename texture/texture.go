@@ -11,13 +11,15 @@ import (
 // Onset is a point in time at which the given image becomes the current one.
 // An image is shown from its Start until the next Onset's Start.
 type Onset struct {
+	// Image names the image, as images.Images.Names reported it.
 	Image string
 	Start float64 // seconds
 }
 
 // Input is everything an Algorithm has to work with.
 type Input struct {
-	// Images are the source image paths, in the order they should appear.
+	// Images name the source images, in the order they should appear. An
+	// algorithm decides only when each one comes on; it never opens them.
 	Images []string
 	// Beats are the detected beat times in seconds, ascending. May be empty,
 	// in which case beat-driven algorithms should fall back to even spacing.
@@ -49,6 +51,24 @@ func (in Input) noveltyAt(t float64) float64 {
 type Algorithm interface {
 	Assign(Input) ([]Onset, error)
 }
+
+// The built-in algorithms. Each is also registered under its name, which its
+// String method returns, for choosing one from a command line or a config
+// file with Get. See the README for how they differ.
+var (
+	// Even ignores the beats and spaces images equally across the track.
+	Even Algorithm = evenAlgorithm{}
+	// Legacy is the 2010 Perl algorithm: even spacing, each image then
+	// snapped to a nearby beat. It is what produced the original videos.
+	Legacy Algorithm = legacyAlgorithm{}
+	// Optimal solves Legacy's objective exactly by dynamic programming.
+	Optimal Algorithm = optimalAlgorithm{}
+	// Novelty is Optimal with beats weighted by audio novelty, so cuts
+	// prefer the places where the music changes character.
+	Novelty Algorithm = noveltyAlgorithm{}
+	// Bars holds each image a whole number of beats, snapped to bar lengths.
+	Bars Algorithm = barsAlgorithm{}
+)
 
 type registration struct {
 	algorithm   Algorithm

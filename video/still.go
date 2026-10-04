@@ -8,11 +8,9 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"golang.org/x/image/draw"
-
-	"github.com/simonwistow/audiotexture/images"
 )
 
-// stillConverter turns a source image file into a YUV420P frame at the output
+// stillConverter turns a source image into a YUV420P frame at the output
 // resolution, preserving aspect ratio and letterboxing the remainder.
 //
 // It keeps its scratch buffers between calls, since a slideshow converts one
@@ -67,14 +65,9 @@ func (c *stillConverter) Close() {
 	}
 }
 
-// Convert decodes path and writes it into dst, which must already be an
-// allocated YUV420P frame at the converter's resolution.
-func (c *stillConverter) Convert(path string, dst *astiav.Frame) error {
-	src, err := images.Decode(path)
-	if err != nil {
-		return err
-	}
-
+// Convert writes src into dst, which must already be an allocated YUV420P
+// frame at the converter's resolution.
+func (c *stillConverter) Convert(src image.Image, dst *astiav.Frame) error {
 	// Letterbox: fill the background, then draw the image scaled to fit.
 	draw.Draw(c.scratch, c.scratch.Bounds(), &image.Uniform{C: c.background}, image.Point{}, draw.Src)
 	if fit := fitRect(src.Bounds(), c.width, c.height); !fit.Empty() {
@@ -85,13 +78,13 @@ func (c *stillConverter) Convert(path string, dst *astiav.Frame) error {
 		return fmt.Errorf("making RGBA frame writable: %w", err)
 	}
 	if err := c.rgbaFrame.Data().FromImage(c.scratch); err != nil {
-		return fmt.Errorf("copying %s into a frame: %w", path, err)
+		return fmt.Errorf("copying into a frame: %w", err)
 	}
 	if err := dst.MakeWritable(); err != nil {
 		return fmt.Errorf("making destination frame writable: %w", err)
 	}
 	if err := c.sws.ScaleFrame(c.rgbaFrame, dst); err != nil {
-		return fmt.Errorf("converting %s to YUV: %w", path, err)
+		return fmt.Errorf("converting to YUV: %w", err)
 	}
 	return nil
 }

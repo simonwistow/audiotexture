@@ -22,9 +22,13 @@ var frameFilePattern = regexp.MustCompile(`^\d{6}\.[A-Za-z0-9]+$`)
 
 // FrameDirectory writes one numbered file per frame (at framerate fps, for
 // duration seconds) into outDir, each hardlinked (falling back to a copy) to
-// the source image selected by onsets at that frame's timestamp. onsets must
-// be sorted ascending by Start and non-empty.
-func FrameDirectory(outDir string, onsets []texture.Onset, duration, framerate float64) (int, error) {
+// the source image selected by onsets at that frame's timestamp. Each onset's
+// Image names a file in srcDir, as images.FromDir lists them. onsets must be
+// sorted ascending by Start and non-empty.
+//
+// Unlike the rest of the pipeline this works on paths rather than readers and
+// writers: a hard link needs a real file at both ends.
+func FrameDirectory(outDir, srcDir string, onsets []texture.Onset, duration, framerate float64) (int, error) {
 	if len(onsets) == 0 {
 		return 0, fmt.Errorf("no onsets to render")
 	}
@@ -43,7 +47,7 @@ func FrameDirectory(outDir string, onsets []texture.Onset, duration, framerate f
 			j++
 		}
 		dst := filepath.Join(outDir, fmt.Sprintf("%06d%s", n, filepath.Ext(onsets[j].Image)))
-		if err := linkOrCopy(onsets[j].Image, dst); err != nil {
+		if err := linkOrCopy(filepath.Join(srcDir, onsets[j].Image), dst); err != nil {
 			return n, fmt.Errorf("writing frame %d: %w", n, err)
 		}
 	}

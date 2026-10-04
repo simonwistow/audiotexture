@@ -1,6 +1,7 @@
 package texture_test
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
@@ -346,5 +347,25 @@ func TestAlgorithmErrors(t *testing.T) {
 		if _, err := algo.Assign(texture.Input{Images: names(3), Duration: 0, FrameRate: 24}); err == nil {
 			t.Errorf("%s: expected an error for zero duration", name)
 		}
+	}
+}
+
+// TestBuiltinsAreRegistered checks each exported algorithm is the one its
+// name looks up, and that its String is that name, so choosing by value and
+// choosing by name always agree.
+func TestBuiltinsAreRegistered(t *testing.T) {
+	for _, a := range []texture.Algorithm{texture.Even, texture.Legacy, texture.Optimal, texture.Novelty, texture.Bars} {
+		name := a.(fmt.Stringer).String()
+		got, err := texture.Get(name)
+		if err != nil {
+			t.Errorf("Get(%q): %v", name, err)
+			continue
+		}
+		if got != a {
+			t.Errorf("Get(%q) = %v, want the exported %v", name, got, a)
+		}
+	}
+	if n := len(texture.List()); n != 5 {
+		t.Errorf("%d algorithms registered, want the 5 built-ins", n)
 	}
 }

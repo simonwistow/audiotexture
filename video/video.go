@@ -1,5 +1,4 @@
-// Package video encodes a texture assignment and its soundtrack into a movie
-// file.
+// Package video encodes a texture assignment and its soundtrack into a movie.
 //
 // Encoding goes through libav* (via go-astiav) in-process: nothing is written
 // to a scratch directory and no external binary is executed.
@@ -9,12 +8,15 @@ import (
 	"errors"
 	"fmt"
 	"image/color"
+	"io"
 	"math"
-	"path/filepath"
+	"os"
 	"sort"
 
 	"github.com/asticode/go-astiav"
 
+	"github.com/simonwistow/audiotexture/images"
+	"github.com/simonwistow/audiotexture/internal/avutil"
 	"github.com/simonwistow/audiotexture/texture"
 )
 
@@ -26,11 +28,18 @@ const (
 	DefaultCRF          = 20
 	DefaultPreset       = "medium"
 	DefaultAudioBitRate = 192_000
+	DefaultFormat       = "mp4"
 )
 
-// Options controls the output file. The zero value is usable: every field
-// falls back to the Default* constant above.
+// Options controls the output. The zero value is usable: every field falls
+// back to the Default* constant above.
 type Options struct {
+	// Format names the container, as FFmpeg knows it: "mp4", "mov",
+	// "matroska". There is no file name to guess it from, so it is stated
+	// here. The video is H.264 and the audio AAC whatever the container, so
+	// it must be one that accepts both, which rules out "webm".
+	Format string
+
 	Width, Height int
 	FrameRate     float64
 	// CRF is the x264 quality target: lower is better, 18-24 is a sane range.
@@ -72,15 +81,31 @@ func (o *Options) applyDefaults() {
 	if o.AudioBitRate <= 0 {
 		o.AudioBitRate = DefaultAudioBitRate
 	}
+	if o.Format == "" {
+		o.Format = DefaultFormat
+	}
 }
 
-// Encode writes a movie to outPath showing each onset's image from its Start
-// until the next one, for duration seconds, with audioPath as the soundtrack.
+// Encode writes a movie to w showing each onset's image from its Start until
+// the next one, for duration seconds. Each onset's Image is fetched from imgs
+// by name as it comes on screen. audio is the soundtrack, read in full from
+// its start; pass nil for a silent movie.
+//
+// The movie is written from w's current position. w must seek because the
+// muxer goes back to fill in the header once it knows what the file holds.
+// When w is an *os.File positioned at its start, an MP4 or MOV also gets its
+// index moved to the front ("faststart"), so it plays before it has finished
+// downloading. That step reopens the file by name, which no other writer has,
+// so for those the index stays at the end: fine for playing a local file,
+// slower to start streaming.
 //
 // onsets must be sorted ascending by Start; Encode sorts a copy if it is not.
-func Encode(outPath string, onsets []texture.Onset, audioPath string, duration float64, opts Options) error {
+func Encode(w io.WriteSeeker, onsets []texture.Onset, imgs images.Images, audio io.ReadSeeker, duration float64, opts Options) error {
 	if len(onsets) == 0 {
 		return errors.New("no onsets to encode")
+	}
+	if imgs == nil {
+		return errors.New("no images to encode")
 	}
 	if duration <= 0 {
 		return fmt.Errorf("duration must be positive, got %v", duration)
@@ -91,9 +116,9 @@ func Encode(outPath string, onsets []texture.Onset, audioPath string, duration f
 	copy(sorted, onsets)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Start < sorted[j].Start })
 
-	e := &encoder{opts: opts, onsets: sorted, duration: duration}
+	e := &encoder{opts: opts, onsets: sorted, imgs: imgs, duration: duration}
 	defer e.close()
-	if err := e.open(outPath, audioPath); err != nil {
+	if err := e.open(w, audio); err != nil {
 		return err
 	}
 	return e.run()
@@ -102,10 +127,11 @@ func Encode(outPath string, onsets []texture.Onset, audioPath string, duration f
 type encoder struct {
 	opts     Options
 	onsets   []texture.Onset
+	imgs     images.Images
 	duration float64
 
 	ofc      *astiav.FormatContext
-	io       *astiav.IOContext
+	pb       *astiav.IOContext
 	wroteHdr bool
 
 	videoStream *astiav.Stream
@@ -122,43 +148,46 @@ type encoder struct {
 	totalFrames int
 }
 
-func (e *encoder) open(outPath, audioPath string) error {
-	ofc, err := astiav.AllocOutputFormatContext(nil, "", outPath)
+func (e *encoder) open(w io.WriteSeeker, audio io.ReadSeeker) error {
+	// The muxer is told the file's name only when it may reopen it for
+	// faststart; otherwise it has no name at all.
+	name := faststartName(w)
+	ofc, err := astiav.AllocOutputFormatContext(nil, e.opts.Format, name)
 	if err != nil {
-		return fmt.Errorf("allocating output context for %s: %w", outPath, err)
+		return fmt.Errorf("allocating %s output: %w", e.opts.Format, err)
 	}
 	if ofc == nil {
-		return fmt.Errorf("could not guess an output format for %s", filepath.Base(outPath))
+		return fmt.Errorf("unknown output format %q", e.opts.Format)
 	}
 	e.ofc = ofc
 
 	if err := e.openVideo(); err != nil {
 		return err
 	}
-	if audioPath != "" {
-		if err := e.openAudio(audioPath); err != nil {
+	if audio != nil {
+		if err := e.openAudio(audio); err != nil {
 			return err
 		}
 	}
 
 	if !e.ofc.OutputFormat().Flags().Has(astiav.IOFormatFlagNofile) {
-		io, err := astiav.OpenIOContext(outPath, astiav.NewIOContextFlags(astiav.IOContextFlagWrite), nil, nil)
-		if err != nil {
-			return fmt.Errorf("creating %s: %w", outPath, err)
+		if e.pb, err = avutil.NewWriteContext(w); err != nil {
+			return err
 		}
-		e.io = io
-		e.ofc.SetPb(io)
+		e.ofc.SetPb(e.pb)
 	}
 
-	// faststart moves the index to the front so the file streams without a
-	// full download; harmless for local playback, useful for uploads.
 	dict := astiav.NewDictionary()
 	defer dict.Free()
-	if err := dict.Set("movflags", "+faststart", astiav.NewDictionaryFlags()); err != nil {
-		return fmt.Errorf("setting muxer options: %w", err)
+	if name != "" {
+		// faststart moves the index to the front so the file streams without
+		// a full download; harmless for local playback, useful for uploads.
+		if err := dict.Set("movflags", "+faststart", astiav.NewDictionaryFlags()); err != nil {
+			return fmt.Errorf("setting muxer options: %w", err)
+		}
 	}
 	if err := e.ofc.WriteHeader(dict); err != nil {
-		return fmt.Errorf("writing header to %s: %w", outPath, err)
+		return fmt.Errorf("writing %s header: %w", e.opts.Format, err)
 	}
 	e.wroteHdr = true
 
@@ -230,7 +259,34 @@ func (e *encoder) openVideo() error {
 	return nil
 }
 
-func (e *encoder) openAudio(audioPath string) error {
+// FormatFor returns the container format FFmpeg associates with a file name's
+// extension -- "mp4" for movie.mp4, "matroska" for movie.mkv -- for use as
+// Options.Format when writing to a file of that name.
+func FormatFor(name string) (string, error) {
+	fc, err := astiav.AllocOutputFormatContext(nil, "", name)
+	if err != nil || fc == nil {
+		return "", fmt.Errorf("no output format for %q", name)
+	}
+	defer fc.Free()
+	return fc.OutputFormat().Name(), nil
+}
+
+// faststartName returns the name the muxer can reopen w by to move the index
+// to the front, or "" when there is none. Only a file written from its start
+// qualifies: the reopened file is read from offset zero, so output that
+// begins further in would be shifted from the wrong place.
+func faststartName(w io.WriteSeeker) string {
+	f, ok := w.(*os.File)
+	if !ok {
+		return ""
+	}
+	if pos, err := f.Seek(0, io.SeekCurrent); err != nil || pos != 0 {
+		return ""
+	}
+	return f.Name()
+}
+
+func (e *encoder) openAudio(audio io.ReadSeeker) error {
 	codec := astiav.FindEncoderByName("aac")
 	if codec == nil {
 		codec = astiav.FindEncoder(astiav.CodecIDAac)
@@ -239,10 +295,26 @@ func (e *encoder) openAudio(audioPath string) error {
 		return errors.New("no AAC encoder in this FFmpeg build")
 	}
 
-	rate, layout, err := audioParams(audioPath, codec)
+	in, err := avutil.OpenAudio(audio)
 	if err != nil {
 		return err
 	}
+	if err := e.openAudioEncoder(codec, in.Stream.CodecParameters()); err != nil {
+		in.Close()
+		return err
+	}
+	track, err := newAudioTrack(in, e.audioCC)
+	if err != nil {
+		return err
+	}
+	e.audio = track
+	return nil
+}
+
+// openAudioEncoder sets up the AAC stream to match src as closely as the
+// encoder allows.
+func (e *encoder) openAudioEncoder(codec *astiav.Codec, src *astiav.CodecParameters) error {
+	rate, layout := audioParams(src.SampleRate(), src.ChannelLayout().Channels(), codec)
 
 	if e.audioStream = e.ofc.NewStream(nil); e.audioStream == nil {
 		return errors.New("allocating audio stream failed")
@@ -271,12 +343,6 @@ func (e *encoder) openAudio(audioPath string) error {
 		return fmt.Errorf("copying audio codec parameters: %w", err)
 	}
 	e.audioStream.SetTimeBase(e.audioCC.TimeBase())
-
-	track, err := newAudioTrack(audioPath, e.audioCC)
-	if err != nil {
-		return err
-	}
-	e.audio = track
 	return nil
 }
 
@@ -299,11 +365,13 @@ func (e *encoder) close() {
 	if e.videoCC != nil {
 		e.videoCC.Free()
 	}
-	if e.io != nil {
-		_ = e.io.Close()
-	}
 	if e.ofc != nil {
 		e.ofc.Free()
+	}
+	// After the format context: freeing an output context leaves its pb
+	// alone, and this one is ours rather than one FFmpeg opened.
+	if e.pb != nil {
+		e.pb.Free()
 	}
 }
 
@@ -331,11 +399,15 @@ func (e *encoder) run() error {
 			for onset+1 < len(e.onsets) && e.onsets[onset+1].Start <= videoTime {
 				onset++
 			}
-			if e.onsets[onset].Image != loaded {
-				if err := e.still.Convert(e.onsets[onset].Image, e.videoFrame); err != nil {
-					return err
+			if name := e.onsets[onset].Image; name != loaded {
+				img, err := e.imgs.Image(name)
+				if err != nil {
+					return fmt.Errorf("loading image %s: %w", name, err)
 				}
-				loaded = e.onsets[onset].Image
+				if err := e.still.Convert(img, e.videoFrame); err != nil {
+					return fmt.Errorf("converting image %s: %w", name, err)
+				}
+				loaded = name
 			}
 			e.videoFrame.SetPts(int64(frame))
 			if err := e.writeFrame(e.videoCC, e.videoStream, e.videoFrame); err != nil {
@@ -407,13 +479,8 @@ func (e *encoder) writeFrame(cc *astiav.CodecContext, stream *astiav.Stream, f *
 }
 
 // audioParams picks a sample rate and channel layout the encoder supports,
-// staying as close to the source as it can.
-func audioParams(path string, codec *astiav.Codec) (int, astiav.ChannelLayout, error) {
-	rate, channels, err := probeAudio(path)
-	if err != nil {
-		return 0, astiav.ChannelLayout{}, err
-	}
-
+// staying as close to the source's as it can.
+func audioParams(rate, channels int, codec *astiav.Codec) (int, astiav.ChannelLayout) {
 	if supported := codec.SupportedSampleRates(); len(supported) > 0 {
 		best, bestDiff := supported[0], math.MaxInt
 		for _, r := range supported {
@@ -440,30 +507,7 @@ func audioParams(path string, codec *astiav.Codec) (int, astiav.ChannelLayout, e
 			layout = supported[0]
 		}
 	}
-	return rate, layout, nil
-}
-
-// probeAudio reports the sample rate and channel count of path's best audio
-// stream without decoding it.
-func probeAudio(path string) (rate, channels int, err error) {
-	fc := astiav.AllocFormatContext()
-	if fc == nil {
-		return 0, 0, errors.New("allocating format context failed")
-	}
-	defer fc.Free()
-	if err := fc.OpenInput(path, nil, nil); err != nil {
-		return 0, 0, fmt.Errorf("opening %s: %w", path, err)
-	}
-	defer fc.CloseInput()
-	if err := fc.FindStreamInfo(nil); err != nil {
-		return 0, 0, fmt.Errorf("finding stream info in %s: %w", path, err)
-	}
-	stream, _, err := fc.FindBestStream(astiav.MediaTypeAudio, -1, -1)
-	if err != nil {
-		return 0, 0, fmt.Errorf("no audio stream in %s: %w", path, err)
-	}
-	cp := stream.CodecParameters()
-	return cp.SampleRate(), cp.ChannelLayout().Channels(), nil
+	return rate, layout
 }
 
 // frameRateRational expresses fps exactly where it can: whole rates become

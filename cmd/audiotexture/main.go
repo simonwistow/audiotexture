@@ -5,6 +5,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -109,14 +110,21 @@ func runGenerate(args []string) error {
 		return err
 	}
 
-	imgs, err := images.Load(*imagesDir)
+	imgs, err := images.FromDir(*imagesDir)
 	if err != nil {
 		return err
 	}
+	names := imgs.Names()
 
-	pcm, err := audio.Decode(*audioPath, 0)
+	track, err := os.Open(*audioPath)
 	if err != nil {
 		return err
+	}
+	defer track.Close()
+
+	pcm, err := audio.Decode(track, 0)
+	if err != nil {
+		return fmt.Errorf("decoding %s: %w", *audioPath, err)
 	}
 	duration := pcm.Duration()
 
@@ -139,7 +147,7 @@ func runGenerate(args []string) error {
 	}
 
 	onsets, err := algo.Assign(texture.Input{
-		Images:    imgs,
+		Images:    names,
 		Beats:     detected.Times,
 		Duration:  duration,
 		FrameRate: *framerate,
@@ -156,7 +164,7 @@ func runGenerate(args []string) error {
 			source = "from " + filepath.Base(*beatFile)
 		}
 		fmt.Printf("%d images, %s of audio, %d beats %s at %.1f BPM, %s algorithm\n",
-			len(imgs), formatDuration(duration), len(detected.Times), source, detected.BPM, *algorithm)
+			len(names), formatDuration(duration), len(detected.Times), source, detected.BPM, *algorithm)
 	}
 
 	if *reproduce {
@@ -168,7 +176,7 @@ func runGenerate(args []string) error {
 	}
 
 	if *framesDir != "" {
-		n, err := render.FrameDirectory(*framesDir, onsets, duration, *framerate)
+		n, err := render.FrameDirectory(*framesDir, *imagesDir, onsets, duration, *framerate)
 		if err != nil {
 			return err
 		}
@@ -180,7 +188,12 @@ func runGenerate(args []string) error {
 		}
 	}
 
+	format, err := video.FormatFor(*outPath)
+	if err != nil {
+		return err
+	}
 	opts := video.Options{
+		Format:    format,
 		Width:     *width,
 		Height:    *height,
 		FrameRate: *framerate,
@@ -191,7 +204,7 @@ func runGenerate(args []string) error {
 		opts.Progress = progressBar()
 	}
 
-	if err := video.Encode(*outPath, onsets, *audioPath, duration, opts); err != nil {
+	if err := writeMovie(*outPath, onsets, imgs, track, duration, opts); err != nil {
 		return err
 	}
 
@@ -226,9 +239,14 @@ func runAnalyse(args []string) error {
 		astiav.SetLogLevel(astiav.LogLevelQuiet)
 	}
 
-	pcm, err := audio.Decode(*audioPath, 0)
+	track, err := os.Open(*audioPath)
 	if err != nil {
 		return err
+	}
+	defer track.Close()
+	pcm, err := audio.Decode(track, 0)
+	if err != nil {
+		return fmt.Errorf("decoding %s: %w", *audioPath, err)
 	}
 	var detected *beats.Result
 	if *beatFile != "" {
@@ -260,6 +278,23 @@ func runAnalyse(args []string) error {
 		}
 	}
 	return nil
+}
+
+// writeMovie encodes into a new file at path, removing it again on failure so
+// a truncated movie is not left looking like a finished one.
+func writeMovie(path string, onsets []texture.Onset, imgs images.Images, track io.ReadSeeker, duration float64, opts video.Options) error {
+	out, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	err = video.Encode(out, onsets, imgs, track, duration, opts)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(path)
+	}
+	return err
 }
 
 // isTerminal reports whether f is a character device, so the redrawing

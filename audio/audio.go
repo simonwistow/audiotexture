@@ -1,4 +1,4 @@
-// Package audio decodes audio files to mono PCM for analysis.
+// Package audio decodes audio to mono PCM for analysis.
 //
 // Decoding goes through libav* (via go-astiav), so anything the local FFmpeg
 // build can demux and decode works: MP3, AAC/M4A, FLAC, Ogg Vorbis, Opus, WAV,
@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 
 	"github.com/asticode/go-astiav"
@@ -39,23 +40,24 @@ func (p *PCM) Duration() float64 {
 	return float64(len(p.Samples)) / float64(p.SampleRate)
 }
 
-// Decode reads path and returns it as mono PCM resampled to sampleRate.
-// Multi-channel input is downmixed to mono by libswresample. Pass 0 for
-// sampleRate to use DefaultSampleRate.
-func Decode(path string, sampleRate int) (*PCM, error) {
+// Decode reads the whole of r, from its start, and returns it as mono PCM
+// resampled to sampleRate. The format is detected from the content, not from
+// a name. Multi-channel input is downmixed to mono by libswresample. Pass 0
+// for sampleRate to use DefaultSampleRate.
+func Decode(r io.ReadSeeker, sampleRate int) (*PCM, error) {
 	if sampleRate <= 0 {
 		sampleRate = DefaultSampleRate
 	}
-	d := &decoder{path: path, sampleRate: sampleRate}
+	d := &decoder{sampleRate: sampleRate}
 	defer d.close()
-	if err := d.open(); err != nil {
+	if err := d.open(r); err != nil {
 		return nil, err
 	}
 	if err := d.run(); err != nil {
 		return nil, err
 	}
 	if len(d.out) == 0 {
-		return nil, fmt.Errorf("decoded no audio from %s", path)
+		return nil, errors.New("decoded no audio")
 	}
 	return &PCM{Samples: d.out, SampleRate: sampleRate}, nil
 }
@@ -63,11 +65,10 @@ func Decode(path string, sampleRate int) (*PCM, error) {
 // decoder holds the libav* objects for one Decode call. Every field that owns
 // C memory is released by close, which is safe to call at any point.
 type decoder struct {
-	path       string
 	sampleRate int
 
+	in        *avutil.Input
 	fc        *astiav.FormatContext
-	openedIn  bool
 	stream    *astiav.Stream
 	cc        *astiav.CodecContext
 	swr       *astiav.SoftwareResampleContext
@@ -80,24 +81,13 @@ type decoder struct {
 	corrupt int
 }
 
-func (d *decoder) open() error {
-	if d.fc = astiav.AllocFormatContext(); d.fc == nil {
-		return errors.New("allocating format context failed")
-	}
-	if err := d.fc.OpenInput(d.path, nil, nil); err != nil {
-		return fmt.Errorf("opening %s: %w", d.path, err)
-	}
-	d.openedIn = true
-
-	if err := d.fc.FindStreamInfo(nil); err != nil {
-		return fmt.Errorf("finding stream info in %s: %w", d.path, err)
-	}
-
-	stream, codec, err := d.fc.FindBestStream(astiav.MediaTypeAudio, -1, -1)
+func (d *decoder) open(r io.ReadSeeker) error {
+	in, err := avutil.OpenAudio(r)
 	if err != nil {
-		return fmt.Errorf("no audio stream in %s: %w", d.path, err)
+		return err
 	}
-	d.stream = stream
+	d.in, d.fc, d.stream = in, in.FC, in.Stream
+	stream, codec := in.Stream, in.Codec
 
 	if d.cc = astiav.AllocCodecContext(codec); d.cc == nil {
 		return errors.New("allocating codec context failed")
@@ -148,11 +138,8 @@ func (d *decoder) close() {
 	if d.cc != nil {
 		d.cc.Free()
 	}
-	if d.openedIn {
-		d.fc.CloseInput()
-	}
-	if d.fc != nil {
-		d.fc.Free()
+	if d.in != nil {
+		d.in.Close()
 	}
 }
 

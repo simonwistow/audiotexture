@@ -1,5 +1,5 @@
-// Package audiotexture generates beat-synced slideshow movies from a
-// directory of images and an audio track.
+// Package audiotexture generates beat-synced slideshow movies from a set of
+// images and an audio track.
 //
 // Beats are detected locally and the movie is encoded in-process through
 // libav*: there is no external API and no ffmpeg subprocess.
@@ -11,13 +11,17 @@
 //	texture  assign images to onset times, with pluggable algorithms
 //	video    encode the assignment and the soundtrack into a movie
 //
-// Generate is the whole pipeline in one call. Reach for the packages directly
-// when you want to reuse an analysis, supply your own beat times, or plug in
-// an algorithm of your own.
+// Generate is the whole pipeline in one call, reading from and writing to
+// interfaces; GenerateFiles is the same thing for paths on disk. Reach for the
+// packages directly when you want to reuse an analysis, supply your own beat
+// times, or plug in an algorithm of your own.
 package audiotexture
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/simonwistow/audiotexture/audio"
 	"github.com/simonwistow/audiotexture/beats"
@@ -28,9 +32,11 @@ import (
 
 // Options configures Generate. The zero value is usable.
 type Options struct {
-	// Algorithm names a registered texture algorithm. Defaults to "legacy",
-	// the behaviour of the original.
-	Algorithm string
+	// Algorithm decides when each image appears: one of the built-ins such
+	// as texture.Bars, or any texture.Algorithm of your own. Defaults to
+	// texture.Legacy, the behaviour of the original. To choose one by name,
+	// as a command line does, look it up with texture.Get.
+	Algorithm texture.Algorithm
 
 	// Beats, if non-nil, is used instead of analysing the audio. Useful for
 	// reproducing a render from beat times captured elsewhere.
@@ -45,12 +51,12 @@ type Options struct {
 	// BeatOptions tunes detection when Beats is nil.
 	BeatOptions *beats.Options
 
-	// Video configures the output file.
+	// Video configures the output, including its container format.
 	Video video.Options
 
 	// Reproduce2010 replays the original Perl's frame loop, including its
 	// bugs, so that a render matches the 2010 videos frame for frame. See
-	// texture.LegacyFrameSequence. Only meaningful with Algorithm "legacy".
+	// texture.LegacyFrameSequence. Only meaningful with texture.Legacy.
 	Reproduce2010 bool
 }
 
@@ -63,25 +69,29 @@ type Result struct {
 	Onsets   []texture.Onset
 }
 
-// Generate reads the images in imagesDir and the soundtrack at audioPath,
-// works out when each image should appear, and writes a movie to outPath.
-func Generate(imagesDir, audioPath, outPath string, opts Options) (*Result, error) {
-	if opts.Algorithm == "" {
-		opts.Algorithm = "legacy"
+// Generate works out when each of imgs should appear against the soundtrack
+// in track, and writes the movie to out.
+//
+// track is read twice, once to find the beats and once to encode it, and each
+// time in full from its start. out is written from its current position; see
+// video.Encode for what it needs and why an *os.File does best.
+func Generate(imgs images.Images, track io.ReadSeeker, out io.WriteSeeker, opts Options) (*Result, error) {
+	if imgs == nil || track == nil || out == nil {
+		return nil, errors.New("images, soundtrack and output are all required")
 	}
-	algo, err := texture.Get(opts.Algorithm)
-	if err != nil {
-		return nil, err
+	algo := opts.Algorithm
+	if algo == nil {
+		algo = texture.Legacy
 	}
 
-	imgs, err := images.Load(imagesDir)
-	if err != nil {
-		return nil, err
+	names := imgs.Names()
+	if len(names) == 0 {
+		return nil, errors.New("no images")
 	}
 
-	pcm, err := audio.Decode(audioPath, 0)
+	pcm, err := audio.Decode(track, 0)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decoding soundtrack: %w", err)
 	}
 	duration := pcm.Duration()
 	if opts.Duration > 0 {
@@ -101,7 +111,7 @@ func Generate(imagesDir, audioPath, outPath string, opts Options) (*Result, erro
 	}
 
 	onsets, err := algo.Assign(texture.Input{
-		Images:    imgs,
+		Images:    names,
 		Beats:     detected.Times,
 		Duration:  duration,
 		FrameRate: frameRate,
@@ -109,22 +119,70 @@ func Generate(imagesDir, audioPath, outPath string, opts Options) (*Result, erro
 		Novelty:   detected.NoveltyAt,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("running algorithm %q: %w", opts.Algorithm, err)
+		return nil, fmt.Errorf("running algorithm %s: %w", algorithmName(algo), err)
 	}
 
 	if opts.Reproduce2010 {
 		onsets, duration = texture.LegacyFrameSequence(onsets, duration, frameRate)
 	}
 
-	if err := video.Encode(outPath, onsets, audioPath, duration, opts.Video); err != nil {
+	if err := video.Encode(out, onsets, imgs, track, duration, opts.Video); err != nil {
 		return nil, err
 	}
 
 	return &Result{
-		Images:   len(imgs),
+		Images:   len(names),
 		Duration: duration,
 		BPM:      detected.BPM,
 		Beats:    detected.Times,
 		Onsets:   onsets,
 	}, nil
+}
+
+// GenerateFiles is Generate for paths: the images in the directory imagesDir,
+// in lexical filename order, the soundtrack at audioPath, and the movie
+// written to a new file at outPath. Unless opts.Video.Format says otherwise,
+// the container follows outPath's extension, as video.FormatFor reports it.
+// Nothing is left at outPath if it fails.
+func GenerateFiles(imagesDir, audioPath, outPath string, opts Options) (res *Result, err error) {
+	if opts.Video.Format == "" {
+		if opts.Video.Format, err = video.FormatFor(outPath); err != nil {
+			return nil, err
+		}
+	}
+
+	imgs, err := images.FromDir(imagesDir)
+	if err != nil {
+		return nil, err
+	}
+
+	track, err := os.Open(audioPath)
+	if err != nil {
+		return nil, err
+	}
+	defer track.Close()
+
+	out, err := os.Create(outPath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if cerr := out.Close(); err == nil && cerr != nil {
+			res, err = nil, cerr
+		}
+		if err != nil {
+			os.Remove(outPath)
+		}
+	}()
+
+	return Generate(imgs, track, out, opts)
+}
+
+// algorithmName is how errors refer to a: its name if it has one, as the
+// built-ins do, and otherwise its type.
+func algorithmName(a texture.Algorithm) string {
+	if s, ok := a.(fmt.Stringer); ok {
+		return s.String()
+	}
+	return fmt.Sprintf("%T", a)
 }

@@ -1,9 +1,9 @@
 package audio_test
 
 import (
+	"bytes"
+	"io"
 	"math"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/simonwistow/audiotexture/audio"
@@ -16,13 +16,9 @@ func TestDecodeWAV(t *testing.T) {
 		duration = 4.0
 		bpm      = 120.0
 	)
-	dir := t.TempDir()
-	path, err := testaudio.WriteWAV(dir, "click.wav", testaudio.ClickTrack(srcRate, duration, bpm), srcRate)
-	if err != nil {
-		t.Fatalf("writing fixture: %v", err)
-	}
+	wav := testaudio.WAV(testaudio.ClickTrack(srcRate, duration, bpm), srcRate)
 
-	pcm, err := audio.Decode(path, 0)
+	pcm, err := audio.Decode(bytes.NewReader(wav), 0)
 	if err != nil {
 		t.Fatalf("Decode: %v", err)
 	}
@@ -51,13 +47,9 @@ func TestDecodeWAV(t *testing.T) {
 
 func TestDecodeExplicitSampleRate(t *testing.T) {
 	const srcRate = 44100
-	dir := t.TempDir()
-	path, err := testaudio.WriteWAV(dir, "click.wav", testaudio.ClickTrack(srcRate, 2.0, 120), srcRate)
-	if err != nil {
-		t.Fatalf("writing fixture: %v", err)
-	}
+	wav := testaudio.WAV(testaudio.ClickTrack(srcRate, 2.0, 120), srcRate)
 
-	pcm, err := audio.Decode(path, 8000)
+	pcm, err := audio.Decode(bytes.NewReader(wav), 8000)
 	if err != nil {
 		t.Fatalf("Decode: %v", err)
 	}
@@ -69,10 +61,56 @@ func TestDecodeExplicitSampleRate(t *testing.T) {
 	}
 }
 
-func TestDecodeMissingFile(t *testing.T) {
-	if _, err := audio.Decode("/nonexistent/nope.mp3", 0); err == nil {
-		t.Fatal("expected an error for a missing file")
+func TestDecodeEmpty(t *testing.T) {
+	if _, err := audio.Decode(bytes.NewReader(nil), 0); err == nil {
+		t.Fatal("expected an error for empty input")
 	}
+}
+
+// TestDecodeRewinds checks that the whole stream is decoded wherever the
+// reader happens to be positioned, since libav* addresses it from its start.
+func TestDecodeRewinds(t *testing.T) {
+	r := bytes.NewReader(testaudio.WAV(testaudio.ClickTrack(44100, 2.0, 120), 44100))
+	if _, err := r.Seek(1000, io.SeekStart); err != nil {
+		t.Fatalf("seeking: %v", err)
+	}
+	pcm, err := audio.Decode(r, 0)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if math.Abs(pcm.Duration()-2.0) > 0.01 {
+		t.Errorf("Duration = %v, want 2.0", pcm.Duration())
+	}
+}
+
+// TestDecodeDataWithEOF covers a reader that returns its last bytes together
+// with io.EOF, which io.Reader allows. Taking the EOF at face value would
+// drop the bytes that came with it.
+func TestDecodeDataWithEOF(t *testing.T) {
+	wav := testaudio.WAV(testaudio.ClickTrack(44100, 2.0, 120), 44100)
+	want, err := audio.Decode(bytes.NewReader(wav), 0)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	got, err := audio.Decode(dataErrReadSeeker{bytes.NewReader(wav)}, 0)
+	if err != nil {
+		t.Fatalf("Decode through a data-with-EOF reader: %v", err)
+	}
+	if len(got.Samples) != len(want.Samples) {
+		t.Errorf("decoded %d samples, want %d", len(got.Samples), len(want.Samples))
+	}
+}
+
+// dataErrReadSeeker returns the final read's data together with io.EOF, as
+// iotest.DataErrReader does, but stays seekable.
+type dataErrReadSeeker struct{ *bytes.Reader }
+
+func (r dataErrReadSeeker) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err == nil && r.Len() == 0 {
+		err = io.EOF
+	}
+	return n, err
 }
 
 // TestDecodeSkipsCorruptPackets checks that one unreadable frame does not
@@ -84,32 +122,20 @@ func TestDecodeMissingFile(t *testing.T) {
 // four-minute track failed to render over one bad frame.
 func TestDecodeSkipsCorruptPackets(t *testing.T) {
 	const srcRate = 44100
-	dir := t.TempDir()
-	path, err := testaudio.WriteWAV(dir, "click.wav", testaudio.ClickTrack(srcRate, 3.0, 120), srcRate)
-	if err != nil {
-		t.Fatalf("writing fixture: %v", err)
-	}
+	raw := testaudio.WAV(testaudio.ClickTrack(srcRate, 3.0, 120), srcRate)
 
-	// Corrupt a run of bytes in the middle of the sample data, past the
-	// 44-byte header.
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("reading fixture: %v", err)
-	}
-	clean, err := audio.Decode(path, 0)
+	clean, err := audio.Decode(bytes.NewReader(raw), 0)
 	if err != nil {
 		t.Fatalf("Decode of the intact file: %v", err)
 	}
 
+	// Corrupt a run of bytes in the middle of the sample data, past the
+	// 44-byte header.
 	for i := len(raw) / 2; i < len(raw)/2+512 && i < len(raw); i++ {
 		raw[i] = 0xFF
 	}
-	damaged := filepath.Join(dir, "damaged.wav")
-	if err := os.WriteFile(damaged, raw, 0o644); err != nil {
-		t.Fatalf("writing damaged fixture: %v", err)
-	}
 
-	got, err := audio.Decode(damaged, 0)
+	got, err := audio.Decode(bytes.NewReader(raw), 0)
 	if err != nil {
 		t.Fatalf("Decode of the damaged file: %v", err)
 	}
@@ -122,11 +148,8 @@ func TestDecodeSkipsCorruptPackets(t *testing.T) {
 // TestDecodeRejectsUndecodableFile checks the skip does not paper over a file
 // with nothing readable in it at all.
 func TestDecodeRejectsUndecodableFile(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "junk.wav")
-	if err := os.WriteFile(p, []byte("RIFF....WAVEfmt junk junk junk"), 0o644); err != nil {
-		t.Fatalf("writing fixture: %v", err)
-	}
-	if _, err := audio.Decode(p, 0); err == nil {
+	junk := []byte("RIFF....WAVEfmt junk junk junk")
+	if _, err := audio.Decode(bytes.NewReader(junk), 0); err == nil {
 		t.Error("expected an error for a file with no decodable audio")
 	}
 }

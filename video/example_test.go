@@ -1,6 +1,7 @@
 package video_test
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"image/color"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/simonwistow/audiotexture/images"
 	"github.com/simonwistow/audiotexture/internal/testaudio"
 	"github.com/simonwistow/audiotexture/texture"
 	"github.com/simonwistow/audiotexture/video"
@@ -39,23 +41,33 @@ func ExampleEncode() {
 	}
 	defer os.RemoveAll(dir)
 
-	var onsets []texture.Onset
 	for i, c := range []color.RGBA{{R: 220, A: 255}, {G: 220, A: 255}, {B: 220, A: 255}} {
-		path := filepath.Join(dir, fmt.Sprintf("%d.png", i))
-		if err := writeSolidPNG(path, c); err != nil {
+		if err := writeSolidPNG(filepath.Join(dir, fmt.Sprintf("%d.png", i)), c); err != nil {
 			log.Fatal(err)
 		}
-		// Each image takes over at its Start and holds until the next one.
-		onsets = append(onsets, texture.Onset{Image: path, Start: float64(i)})
 	}
-
-	audioPath, err := testaudio.WriteWAV(dir, "track.wav", testaudio.ClickTrack(44100, 3, 120), 44100)
+	imgs, err := images.FromDir(dir)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	out := filepath.Join(dir, "slideshow.mp4")
-	err = video.Encode(out, onsets, audioPath, 3.0, video.Options{
+	// Each image takes over at its Start and holds until the next one.
+	var onsets []texture.Onset
+	for i, name := range imgs.Names() {
+		onsets = append(onsets, texture.Onset{Image: name, Start: float64(i)})
+	}
+
+	// The soundtrack is any io.ReadSeeker; here, a WAV built in memory.
+	audio := bytes.NewReader(testaudio.WAV(testaudio.ClickTrack(44100, 3, 120), 44100))
+
+	// The output is any io.WriteSeeker. An *os.File also gets faststart.
+	out, err := os.Create(filepath.Join(dir, "slideshow.mp4"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer out.Close()
+
+	err = video.Encode(out, onsets, imgs, audio, 3.0, video.Options{
 		Width:  320,
 		Height: 240,
 		Preset: "ultrafast",
@@ -64,7 +76,7 @@ func ExampleEncode() {
 		log.Fatal(err)
 	}
 
-	info, err := os.Stat(out)
+	info, err := out.Stat()
 	if err != nil {
 		log.Fatal(err)
 	}

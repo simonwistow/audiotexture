@@ -76,24 +76,17 @@ func RampedBeatTimes(duration, startBPM, endBPM float64) []float64 {
 	return ts
 }
 
-// WriteWAV writes samples as a 16-bit mono PCM WAV file and returns its path.
-func WriteWAV(dir, name string, samples []float64, sampleRate int) (string, error) {
-	path := filepath.Join(dir, name)
-	f, err := os.Create(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
+// WAV encodes samples as a 16-bit mono PCM WAV file.
+func WAV(samples []float64, sampleRate int) []byte {
 	dataLen := len(samples) * 2
-	hdr := make([]byte, 0, 44)
+	b := make([]byte, 0, 44+dataLen)
 	le := binary.LittleEndian
-	u32 := func(v uint32) { hdr = le.AppendUint32(hdr, v) }
-	u16 := func(v uint16) { hdr = le.AppendUint16(hdr, v) }
+	u32 := func(v uint32) { b = le.AppendUint32(b, v) }
+	u16 := func(v uint16) { b = le.AppendUint16(b, v) }
 
-	hdr = append(hdr, "RIFF"...)
+	b = append(b, "RIFF"...)
 	u32(uint32(36 + dataLen))
-	hdr = append(hdr, "WAVEfmt "...)
+	b = append(b, "WAVEfmt "...)
 	u32(16)                     // fmt chunk size
 	u16(1)                      // PCM
 	u16(1)                      // mono
@@ -101,17 +94,19 @@ func WriteWAV(dir, name string, samples []float64, sampleRate int) (string, erro
 	u32(uint32(sampleRate * 2)) // byte rate
 	u16(2)                      // block align
 	u16(16)                     // bits per sample
-	hdr = append(hdr, "data"...)
+	b = append(b, "data"...)
 	u32(uint32(dataLen))
-	if _, err := f.Write(hdr); err != nil {
-		return "", err
-	}
 
-	buf := make([]byte, 0, dataLen)
 	for _, s := range samples {
-		buf = le.AppendUint16(buf, uint16(int16(math.Round(math.Max(-1, math.Min(1, s))*32767))))
+		u16(uint16(int16(math.Round(math.Max(-1, math.Min(1, s)) * 32767))))
 	}
-	if _, err := f.Write(buf); err != nil {
+	return b
+}
+
+// WriteWAV writes samples as a 16-bit mono PCM WAV file and returns its path.
+func WriteWAV(dir, name string, samples []float64, sampleRate int) (string, error) {
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, WAV(samples, sampleRate), 0o644); err != nil {
 		return "", err
 	}
 	return path, nil

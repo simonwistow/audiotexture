@@ -17,12 +17,10 @@ import (
 // interleave audio and video by timestamp instead of buffering a whole track.
 type audioTrack struct {
 	// Input.
-	fc       *astiav.FormatContext
-	openedIn bool
-	stream   *astiav.Stream
-	dec      *astiav.CodecContext
-	pkt      *astiav.Packet
-	decoded  *astiav.Frame
+	in      *avutil.Input
+	dec     *astiav.CodecContext
+	pkt     *astiav.Packet
+	decoded *astiav.Frame
 
 	// Resampling into the encoder's format.
 	swr       *astiav.SoftwareResampleContext
@@ -41,16 +39,17 @@ type audioTrack struct {
 	corrupt int
 }
 
-// newAudioTrack opens path and prepares it for encoding with enc.
-func newAudioTrack(path string, enc *astiav.CodecContext) (*audioTrack, error) {
-	t := &audioTrack{enc: enc, frameSize: enc.FrameSize()}
+// newAudioTrack prepares in for encoding with enc. It takes ownership of in,
+// which it closes on failure and on Close.
+func newAudioTrack(in *avutil.Input, enc *astiav.CodecContext) (*audioTrack, error) {
+	t := &audioTrack{in: in, enc: enc, frameSize: enc.FrameSize()}
 
 	// Some encoders accept any frame size; pick something reasonable.
 	if t.frameSize <= 0 {
 		t.frameSize = 1024
 	}
 
-	if err := t.openInput(path); err != nil {
+	if err := t.openDecoder(); err != nil {
 		t.Close()
 		return nil, err
 	}
@@ -61,24 +60,8 @@ func newAudioTrack(path string, enc *astiav.CodecContext) (*audioTrack, error) {
 	return t, nil
 }
 
-func (t *audioTrack) openInput(path string) error {
-	if t.fc = astiav.AllocFormatContext(); t.fc == nil {
-		return errors.New("allocating format context failed")
-	}
-	if err := t.fc.OpenInput(path, nil, nil); err != nil {
-		return fmt.Errorf("opening %s: %w", path, err)
-	}
-	t.openedIn = true
-	if err := t.fc.FindStreamInfo(nil); err != nil {
-		return fmt.Errorf("finding stream info in %s: %w", path, err)
-	}
-
-	stream, codec, err := t.fc.FindBestStream(astiav.MediaTypeAudio, -1, -1)
-	if err != nil {
-		return fmt.Errorf("no audio stream in %s: %w", path, err)
-	}
-	t.stream = stream
-
+func (t *audioTrack) openDecoder() error {
+	stream, codec := t.in.Stream, t.in.Codec
 	if t.dec = astiav.AllocCodecContext(codec); t.dec == nil {
 		return errors.New("allocating decoder context failed")
 	}
@@ -151,13 +134,9 @@ func (t *audioTrack) Close() {
 		t.dec.Free()
 		t.dec = nil
 	}
-	if t.openedIn {
-		t.fc.CloseInput()
-		t.openedIn = false
-	}
-	if t.fc != nil {
-		t.fc.Free()
-		t.fc = nil
+	if t.in != nil {
+		t.in.Close()
+		t.in = nil
 	}
 }
 
@@ -201,7 +180,7 @@ func (t *audioTrack) Next() (*astiav.Frame, error) {
 // runs out.
 func (t *audioTrack) fill() error {
 	for !t.inputDone && t.fifo.Size() < t.frameSize {
-		if err := t.fc.ReadFrame(t.pkt); err != nil {
+		if err := t.in.FC.ReadFrame(t.pkt); err != nil {
 			if !errors.Is(err, astiav.ErrEof) {
 				return fmt.Errorf("reading audio packet: %w", err)
 			}
@@ -241,7 +220,7 @@ func (t *audioTrack) finishInput() error {
 
 func (t *audioTrack) handlePacket() error {
 	defer t.pkt.Unref()
-	if t.pkt.StreamIndex() != t.stream.Index() {
+	if t.pkt.StreamIndex() != t.in.Stream.Index() {
 		return nil
 	}
 	if err := t.dec.SendPacket(t.pkt); err != nil {

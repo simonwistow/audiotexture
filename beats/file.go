@@ -2,14 +2,16 @@ package beats
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 )
 
-// LoadFile reads beat times from a text file.
+// Load reads beat times from r.
 //
 // It accepts the sidecar format the original Perl wrote next to each track --
 // a comment line, a "dur=" line, then one comma-separated line of beat times:
@@ -25,17 +27,11 @@ import (
 // This exists so that a track analysed years ago against an API that no longer
 // exists can still be rendered with exactly its original timings, rather than
 // with whatever Detect makes of it today.
-func LoadFile(path string) (*Result, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("opening beat file: %w", err)
-	}
-	defer f.Close()
-
+func Load(r io.Reader) (*Result, error) {
 	var times []float64
 	var duration float64
 
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 1<<20), 1<<24) // one very long line is normal here
 	for line := 1; scanner.Scan(); line++ {
 		text := strings.TrimSpace(scanner.Text())
@@ -64,10 +60,10 @@ func LoadFile(path string) (*Result, error) {
 		times = append(times, parsed...)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("reading beat file: %w", err)
+		return nil, fmt.Errorf("reading beat times: %w", err)
 	}
 	if len(times) == 0 {
-		return nil, fmt.Errorf("no beat times found in %s", path)
+		return nil, errors.New("no beat times found")
 	}
 
 	sort.Float64s(times)
@@ -80,6 +76,21 @@ func LoadFile(path string) (*Result, error) {
 		HopSeconds: 0,
 		Duration:   duration,
 	}, nil
+}
+
+// LoadFile is Load for the file at path.
+func LoadFile(path string) (*Result, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("opening beat file: %w", err)
+	}
+	defer f.Close()
+
+	r, err := Load(f)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return r, nil
 }
 
 // bpmFromTimes estimates tempo as the median inter-beat interval, which

@@ -6,7 +6,7 @@ import (
 )
 
 func init() {
-	Register("bars", "hold each image a whole number of beats, quantised to bar lengths", barsAlgorithm{})
+	Register("bars", "hold each image a whole number of beats, quantised to bar lengths", Bars)
 }
 
 // musicalLengths are the shot lengths, in beats, that sound deliberate: whole
@@ -30,6 +30,8 @@ var musicalLengths = []int{1, 2, 3, 4, 6, 8, 12, 16, 24, 32}
 // The cost is that the images no longer fill the duration evenly if the tempo
 // drifts, and the last image may run long. That is the trade.
 type barsAlgorithm struct{}
+
+func (barsAlgorithm) String() string { return "bars" }
 
 func (barsAlgorithm) Assign(in Input) ([]Onset, error) {
 	n := len(in.Images)

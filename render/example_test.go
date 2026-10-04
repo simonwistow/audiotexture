@@ -25,18 +25,17 @@ func ExampleFrameDirectory() {
 	// distinguishable so the output can show which frame is which.
 	var onsets []texture.Onset
 	for i, name := range []string{"a.png", "b.png"} {
-		path := filepath.Join(dir, name)
-		if err := os.WriteFile(path, []byte(name), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o600); err != nil {
 			log.Fatal(err)
 		}
-		onsets = append(onsets, texture.Onset{Image: path, Start: float64(i)})
+		onsets = append(onsets, texture.Onset{Image: name, Start: float64(i)})
 	}
 
 	// Two seconds at 10 fps: the first image holds for ten frames, then the
 	// second takes over. The count is 21 rather than 20 because the last
 	// instant gets a frame of its own, as it did in the original.
 	out := filepath.Join(dir, "frames")
-	n, err := render.FrameDirectory(out, onsets, 2.0, 10)
+	n, err := render.FrameDirectory(out, dir, onsets, 2.0, 10)
 	if err != nil {
 		log.Fatal(err)
 	}

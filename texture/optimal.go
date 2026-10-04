@@ -3,7 +3,7 @@ package texture
 import "fmt"
 
 func init() {
-	Register("optimal", "the legacy objective solved exactly: beats, near-even spacing", optimalAlgorithm{})
+	Register("optimal", "the legacy objective solved exactly: beats, near-even spacing", Optimal)
 }
 
 // beatBonus is how much landing on a beat is worth, in units of squared
@@ -29,6 +29,8 @@ const beatBonus = 0.25
 // images, that is worth about 0.03 on a steady 120 BPM grid and about 2.1 on
 // beats 3.7 seconds apart.
 type optimalAlgorithm struct{}
+
+func (optimalAlgorithm) String() string { return "optimal" }
 
 func (optimalAlgorithm) Assign(in Input) ([]Onset, error) {
 	if len(in.Images) == 0 {
