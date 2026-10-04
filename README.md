@@ -331,11 +331,9 @@ uses the result to decide which beats are worth cutting on.
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE).
+GPL, version 3 or (at your option) any later version. See
+[LICENSE](LICENSE).
 
-Worth knowing: libx264 requires FFmpeg to be configured `--enable-gpl`, which
-is what `brew install ffmpeg` and the build script here both do. This code
-stays MIT, but a binary linked against a GPL-configured FFmpeg is covered by
-the GPL when you distribute it. FFmpeg can be built with `libopenh264`
-instead if that matters to you; nothing here depends on x264 specifically,
-only on some H.264 encoder being present.
+This fits the dependencies: libx264 requires FFmpeg to be configured with
+`--enable-gpl`, which is what `brew install ffmpeg` and the build script here
+both do. A binary built from this code is therefore under the GPL either way.
