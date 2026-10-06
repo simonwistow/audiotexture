@@ -56,8 +56,15 @@ type Options struct {
 
 	// Reproduce2010 replays the original Perl's frame loop, including its
 	// bugs, so that a render matches the 2010 videos frame for frame. See
-	// texture.LegacyFrameSequence. Only meaningful with texture.Legacy.
+	// texture.LegacyFrameSequence. Only meaningful with texture.Legacy. The
+	// 2010 photographs also need IgnoreOrientation.
 	Reproduce2010 bool
+
+	// IgnoreOrientation makes GenerateFiles use the images exactly as
+	// stored, rather than turned upright by their EXIF orientation tag; see
+	// images.FS.IgnoreOrientation. Generate takes its images ready-made, so
+	// set it on them there instead.
+	IgnoreOrientation bool
 }
 
 // Result reports what Generate did.
@@ -155,6 +162,7 @@ func GenerateFiles(imagesDir, audioPath, outPath string, opts Options) (res *Res
 	if err != nil {
 		return nil, err
 	}
+	imgs.IgnoreOrientation = opts.IgnoreOrientation
 
 	track, err := os.Open(audioPath)
 	if err != nil {

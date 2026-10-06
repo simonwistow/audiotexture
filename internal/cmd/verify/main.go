@@ -29,6 +29,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+	// The originals were rendered from the stored pixels; the archive's
+	// orientation tags are wrong.
+	src.IgnoreOrientation = true
 	imgs := src.Names()
 	fmt.Printf("%d source images, %s .. %s\n\n",
 		len(imgs), filepath.Base(imgs[0]), filepath.Base(imgs[len(imgs)-1]))

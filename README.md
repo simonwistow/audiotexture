@@ -88,19 +88,20 @@ sequence you want, exactly as the original required.
 
 ```
 generate flags:
-  --images     directory of source images            (required)
-  --audio      soundtrack: mp3, m4a, flac, ogg, wav  (required)
-  --out        output movie file                     (--out or --frames)
-  --frames     also write numbered frames here, as the original Perl did
-  --beats      read beat times from a file instead of detecting them
-  --algorithm  texture algorithm (default "legacy")
-  --framerate  output frame rate (default 24)
-  --width      output width (default 1280)
-  --height     output height (default 720)
-  --crf        x264 quality, lower is better (default 20)
-  --preset     x264 preset (default "medium")
-  --quiet      suppress progress output
-  --verbose    show FFmpeg's own logging
+  --images       directory of source images            (required)
+  --audio        soundtrack: mp3, m4a, flac, ogg, wav  (required)
+  --out          output movie file                     (--out or --frames)
+  --frames       also write numbered frames here, as the original Perl did
+  --beats        read beat times from a file instead of detecting them
+  --algorithm    texture algorithm (default "legacy")
+  --ignore-exif  use images as stored, ignoring the EXIF orientation tag
+  --framerate    output frame rate (default 24)
+  --width        output width (default 1280)
+  --height       output height (default 720)
+  --crf          x264 quality, lower is better (default 20)
+  --preset       x264 preset (default "medium")
+  --quiet        suppress progress output
+  --verbose      show FFmpeg's own logging
 
 tempo flags (generate and analyse both take these):
   --bpm            skip detection and use a fixed tempo
@@ -158,11 +159,11 @@ are for example purposes only - it's really about the flags.
 audiotexture generate --images data/input/images \
     --audio data/input/songs/creep/creep.mp3 \
     --beats data/input/songs/creep/creep.txt \
-    --algorithm legacy --reproduce-2010 --framerate 24 \
+    --algorithm legacy --reproduce-2010 --ignore-exif --framerate 24 \
     --out creep.mp4
 ```
 
-Three things have to line up, and only the first is obvious.
+Four things have to line up, and only the first is obvious.
 
 **The beat times.** The Echo Nest API is gone and no local detector will agree
 with it beat for beat, but the original cached every analysis in a `.txt`
@@ -184,6 +185,12 @@ Without this the output is only about 2% frame-identical to the original. With i
 
 You should always leave `--reproduce-2010` off for new work — then every image is shown, starting
 with the first, and the movie lasts as long as the music.
+
+**The orientation.** Every one of the original 680 photographs carries an EXIF
+orientation tag of 8, "rotate 90°", and it is wrong: the stored pixels are
+already upright. The 2010 script never read EXIF, so it never noticed.
+audiotexture applies the tag by default, as image viewers do, so
+the `--ignore-exif` flag should be passed.
 
 `--frames` reproduces the original's actual output, a directory of `%06d.{ext}`
 hardlinks, for diffing against archived frames or feeding into something else.
@@ -212,8 +219,9 @@ algorithm actually decides) agree exactly.
 **Images:** JPEG, PNG, GIF, TIFF, BMP and WebP (`.jpg`, `.jpeg`, `.png`,
 `.gif`, `.tif`, `.tiff`, `.bmp`, `.webp`, in any letter case). Other files in
 the directory are skipped. Images are decoded by Go's own image packages, not
-FFmpeg, so this list is the same everywhere. The EXIF orientation tag is
-ignored, as it was in 2010.
+FFmpeg, so this list is the same everywhere. A photo's EXIF orientation tag
+is applied, so pictures taken sideways come out upright; `--ignore-exif` uses
+the pixels exactly as stored instead.
 
 **Audio:** anything your FFmpeg build can decode, which in practice means MP3,
 AAC/M4A, FLAC, Ogg Vorbis, Opus and WAV. It is downmixed to mono for beat

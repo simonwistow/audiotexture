@@ -10,6 +10,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Data Input:
     - Image Loading.
+    - EXIF orientation applied to images by default, with `--ignore-exif` to turn it off.
     - Music Loading. Handles anything that FFmpeg can read.
 - Music Analysis to give input to the texture algorithms:
     - Beat Detection algorithm using an implementation of Ellis (2007), replacing the Echo Nest API, which no longer exists.

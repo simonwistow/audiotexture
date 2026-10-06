@@ -11,19 +11,22 @@
 // Go image packages rather than libav*, so which formats work does not depend
 // on how the local FFmpeg happens to be configured.
 //
-// # EXIF orientation is ignored
+// # EXIF orientation
 //
-// Decode returns the pixels as they are stored and never applies the EXIF
-// orientation tag, which matters more than it sounds. The 2010 Perl ignored
-// EXIF too, so this matches it -- and the photographs that script was written
-// for carry an orientation tag of 8, "rotate 90 degrees", which is simply
-// wrong: the stored pixels are already upright. Honouring the tag would turn
-// every frame on its side. Anything that does honour it, which is ffmpeg and
-// most image viewers, shows those images rotated.
+// Cameras and phones usually store pixels the way the sensor was held and
+// record in an EXIF tag how to turn them upright. Decode applies that tag, as
+// image viewers do, so a portrait photograph comes out portrait. It is read
+// from JPEG, TIFF, PNG and WebP; GIF and BMP cannot carry one.
+//
+// Set FS.IgnoreOrientation to use the pixels exactly as stored instead. The
+// 2010 Perl did that, and the photographs it was written for need it: they
+// carry an orientation tag of 8, "rotate 90 degrees", which is simply wrong,
+// because the stored pixels are already upright. Honouring the tag turns every
+// one of them on its side.
 package images
 
 import (
-	"bufio"
+	"bytes"
 	"fmt"
 	"image"
 	"io"
@@ -72,6 +75,11 @@ type Images interface {
 // FS is the supported image files at the top level of a file system, in
 // lexical filename order. Subdirectories and other files are skipped.
 type FS struct {
+	// IgnoreOrientation, if set, makes Image return the pixels exactly as
+	// stored rather than turned upright by the EXIF orientation tag. Use it
+	// for images whose tag is wrong, as the 2010 originals' is.
+	IgnoreOrientation bool
+
 	fsys  fs.FS
 	names []string
 }
@@ -117,7 +125,8 @@ func (s *FS) Names() []string {
 	return append([]string(nil), s.names...)
 }
 
-// Image opens and decodes the named file.
+// Image opens and decodes the named file, turned upright by its EXIF
+// orientation unless IgnoreOrientation is set.
 func (s *FS) Image(name string) (image.Image, error) {
 	f, err := s.fsys.Open(name)
 	if err != nil {
@@ -125,20 +134,38 @@ func (s *FS) Image(name string) (image.Image, error) {
 	}
 	defer f.Close()
 
-	img, err := Decode(f)
+	img, err := decode(f, !s.IgnoreOrientation)
 	if err != nil {
 		return nil, fmt.Errorf("decoding %s: %w", name, err)
 	}
 	return img, nil
 }
 
-// Decode reads a still image in any of the supported formats from r.
+// Decode reads a still image in any of the supported formats from r and
+// turns it upright as its EXIF orientation tag says. For the pixels exactly as
+// stored, call image.Decode directly.
 //
 // Stills go through the Go image packages rather than libav*: it hands back an
 // image.Image directly, which is what the high-quality resampling in
 // x/image/draw wants, and it keeps still-image support independent of how the
 // local FFmpeg happens to be configured.
 func Decode(r io.Reader) (image.Image, error) {
-	img, _, err := image.Decode(bufio.NewReader(r))
-	return img, err
+	return decode(r, true)
+}
+
+func decode(r io.Reader, upright bool) (image.Image, error) {
+	// Read it all: the orientation tag and the pixels are both needed, and
+	// in a TIFF the tag can be anywhere in the file.
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	img, _, err := image.Decode(bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	if upright {
+		img = orient(img, orientation(b))
+	}
+	return img, nil
 }
