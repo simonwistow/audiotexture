@@ -26,7 +26,7 @@ root="$(cd "$(dirname "$0")/../.." && pwd)"
 ours='lib(avcodec|avdevice|avfilter|avformat|avutil|swresample|swscale|x264)[.]'
 
 mkdir -p "$outdir"
-outdir="$(cd "$outdir" && pwd)"
+outdir="$(cd "$outdir" && pwd -P)"
 dir="$outdir/$name"
 rm -rf "$dir"
 mkdir -p "$dir/bin" "$dir/lib"
@@ -71,10 +71,19 @@ Linux)
 		echo "error: unresolved libraries" >&2
 		exit 1
 	fi
-	if grep -E "$ours" <<<"$loaded" | grep -v -F "$dir/lib/"; then
-		echo "error: the libraries above load from outside the bundle" >&2
-		exit 1
-	fi
+	# ldd reports the path as the RUNPATH spelled it, bin/../lib, so resolve
+	# each one before comparing.
+	outside=0
+	while read -r lib file; do
+		case "$(readlink -f "$file")" in
+		"$dir"/lib/*) ;;
+		*)
+			echo "error: $lib loads from $file, outside the bundle" >&2
+			outside=1
+			;;
+		esac
+	done < <(grep -E "$ours" <<<"$loaded" | awk '{ print $1, $3 }')
+	[ "$outside" -eq 0 ] || exit 1
 	;;
 
 Darwin)

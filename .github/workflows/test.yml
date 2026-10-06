@@ -17,10 +17,10 @@ env:
 jobs:
   tidy:
     name: format and tidy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -56,17 +56,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The whole prefix is one cache entry, x264 included, so a hit needs
       # nothing else installed on the runner. Hashing the build script means
       # changing how FFmpeg is configured rebuilds it.
       - name: Cache FFmpeg
         id: ffmpeg-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/ffmpeg
           key: ffmpeg-${{ env.FFMPEG_VERSION }}-x264-${{ env.X264_VERSION }}-${{ runner.os }}-${{ hashFiles('.github/scripts/build-ffmpeg.sh') }}
@@ -100,7 +100,7 @@ jobs:
             echo "CGO_LDFLAGS=-L$prefix/lib" >> "$GITHUB_ENV"
           fi
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
