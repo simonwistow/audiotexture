@@ -22,7 +22,8 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     - `novelty` — `optimal`, with beats weighted by audio novelty.
     - `bars` — hold each image a whole number of beats, snapped to a bar length.
 - Movie Generation. Again, supporting anything FFmpeg can write.
-- Command Line Tool with various options.
+- Command Line Tool with various options, including `version`.
+- Prebuilt releases for Linux x86-64 and macOS on Apple silicon, bundled with the FFmpeg they need.
 - Bug Compatibility with the 2010 original (optional).
   
 ### Known limitations

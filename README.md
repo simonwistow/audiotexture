@@ -14,6 +14,25 @@ to encode.
 
 ## Install
 
+### Prebuilt
+
+Each [release](https://github.com/simonwistow/audiotexture/releases) has a
+download for Linux x86-64 (glibc 2.35 or newer, so Ubuntu 22.04 onwards) and
+for macOS on Apple silicon (13 or newer). Each bundles the FFmpeg it needs, so
+nothing else has to be installed:
+
+```sh
+tar -xzf audiotexture-v0.1.0-linux-amd64.tar.gz
+audiotexture-v0.1.0-linux-amd64/bin/audiotexture version
+```
+
+Keep `bin` and `lib` together: the binary finds its libraries relative to
+itself. On macOS, a download from a browser is quarantined, and the build is
+not notarised, so clear the flag first with
+`xattr -dr com.apple.quarantine audiotexture-v0.1.0-darwin-arm64`.
+
+### From source
+
 The audio decoding and movie encoding go through
 [go-astiav](https://github.com/asticode/go-astiav), cgo bindings to libav\*, so
 **FFmpeg 8.x development libraries** are required at build time — `libavcodec`,
@@ -25,14 +44,14 @@ against 7 or 9.
 Check what you have with `pkg-config --modversion libavcodec`: FFmpeg 8.x
 reports `62.x`, and 7.x reports `61.x`.
 
-### macOS
+#### macOS
 
 ```sh
 brew install ffmpeg pkg-config      # if Homebrew is currently on 8.x
 go install github.com/simonwistow/audiotexture/cmd/audiotexture@latest
 ```
 
-### Fedora
+#### Fedora
 
 RPM Fusion's `ffmpeg-devel` has the headers and libraries, but check its
 version first; if it is not 8.x, build FFmpeg as below.
@@ -44,7 +63,7 @@ sudo dnf install ffmpeg-devel pkgconfig
 go install github.com/simonwistow/audiotexture/cmd/audiotexture@latest
 ```
 
-### Ubuntu, Debian and anything else without FFmpeg 8
+#### Ubuntu, Debian and anything else without FFmpeg 8
 
 Distribution packages are still on 6.x or 7.x, so build FFmpeg yourself.
 `.github/scripts/build-ffmpeg.sh PREFIX` builds exactly what CI builds: FFmpeg

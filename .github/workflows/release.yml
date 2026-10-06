@@ -1,0 +1,154 @@
+name: release
+
+# Pushing a version tag releases it. See RELEASING.md for the steps before
+# that, which come down to: run `changelog release`, commit, tag, push.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+env:
+  # As in test.yml: go-astiav is pinned to one major version of the libav*
+  # ABI.
+  FFMPEG_VERSION: n8.0
+  X264_VERSION: stable
+
+jobs:
+  changelog:
+    name: check the changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # A tag with no changelog entry is almost always a mistake: either the
+      # release was never written up, or the tag has the wrong number.
+      - name: CHANGELOG.md has a section for ${{ github.ref_name }}
+        run: go run ./internal/cmd/changelog check "$GITHUB_REF_NAME"
+
+      - name: Release notes from CHANGELOG.md
+        run: go run ./internal/cmd/changelog notes "$GITHUB_REF_NAME" > release-notes.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+
+  build:
+    name: build (${{ matrix.platform }})
+    needs: changelog
+    strategy:
+      matrix:
+        include:
+          # The oldest supported runner, so the binary needs only the glibc
+          # of Ubuntu 22.04 or later rather than of whatever is newest.
+          - os: ubuntu-22.04
+            platform: linux-amd64
+          - os: macos-latest
+            platform: darwin-arm64
+    runs-on: ${{ matrix.os }}
+    env:
+      # Without this, clang targets the runner's own macOS version and the
+      # binary refuses to start on anything older. Ignored on Linux.
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - if: runner.os == 'Linux'
+        name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y nasm patchelf
+
+      # Built from scratch rather than restored from test.yml's cache, so
+      # BUILD-INFO and the source archives describe exactly what ships. The
+      # source is the same on every platform, so it is kept from one.
+      - name: Build FFmpeg
+        env:
+          SOURCE_ARCHIVE_DIR: ${{ runner.os == 'Linux' && format('{0}/dist', github.workspace) || '' }}
+        run: .github/scripts/build-ffmpeg.sh "$RUNNER_TEMP/ffmpeg"
+
+      - name: Point cgo at FFmpeg
+        run: |
+          prefix="$RUNNER_TEMP/ffmpeg"
+          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "CGO_CFLAGS=-I$prefix/include" >> "$GITHUB_ENV"
+          # The rpath lets the tests run against the build tree; bundle.sh
+          # replaces it with one relative to the binary.
+          if [ "$RUNNER_OS" = Linux ]; then
+            echo "CGO_LDFLAGS=-L$prefix/lib -Wl,-rpath,$prefix/lib" >> "$GITHUB_ENV"
+          else
+            echo "CGO_LDFLAGS=-L$prefix/lib" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go test
+        run: go test ./...
+
+      - name: Build
+        run: >
+          go build -trimpath
+          -ldflags "-s -w -X main.version=$GITHUB_REF_NAME"
+          -o audiotexture ./cmd/audiotexture
+
+      - name: Bundle with FFmpeg
+        run: >
+          .github/scripts/bundle.sh "$RUNNER_TEMP/ffmpeg" audiotexture dist
+          "audiotexture-$GITHUB_REF_NAME-${{ matrix.platform }}"
+
+      # bundle.sh checks the libraries resolve inside the bundle. This checks
+      # nothing else is missing, on a system with none of the runner's extras.
+      - if: runner.os == 'Linux'
+        name: Run in a clean Ubuntu 22.04
+        run: >
+          docker run --rm -v "$PWD/dist:/dist:ro" ubuntu:22.04
+          "/dist/audiotexture-$GITHUB_REF_NAME-${{ matrix.platform }}/bin/audiotexture" version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.platform }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: publish
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum -- * > SHA256SUMS && cat SHA256SUMS
+
+      # A tag such as v1.0.0-rc1 is a pre-release, as semver has it.
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" --verify-tag "${flags[@]}" \
+            --title "audiotexture $GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            dist/*

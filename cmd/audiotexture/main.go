@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	"github.com/asticode/go-astiav"
@@ -33,6 +34,8 @@ func main() {
 		err = runGenerate(os.Args[2:])
 	case "analyse", "analyze":
 		err = runAnalyse(os.Args[2:])
+	case "version", "--version":
+		fmt.Println("audiotexture", buildVersion())
 	case "list-algorithms":
 		for _, name := range texture.List() {
 			fmt.Printf("%-8s %s\n", name, texture.Describe(name))
@@ -51,6 +54,21 @@ func main() {
 	}
 }
 
+// version is set by release builds with -ldflags "-X main.version=v1.2.3".
+var version string
+
+// buildVersion reports which audiotexture this is: the release it was built
+// as, else the module version `go install ...@v1.2.3` records, else "devel".
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "devel"
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, `audiotexture - beat-synced slideshow generator
 
@@ -58,6 +76,7 @@ Usage:
   audiotexture generate --images <dir> --audio <file> --out <file.mp4> [flags]
   audiotexture analyse --audio <file> [--times]
   audiotexture list-algorithms
+  audiotexture version
 
 Images are used in lexical filename order.`)
 }

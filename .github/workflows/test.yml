@@ -37,6 +37,11 @@ jobs:
             exit 1
           fi
 
+      # Caught here, on every push, rather than when a release tag is
+      # refused for it.
+      - name: CHANGELOG.md follows Keep a Changelog
+        run: go run ./internal/cmd/changelog lint
+
       - name: go mod tidy
         run: |
           go mod tidy
