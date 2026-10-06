@@ -18,7 +18,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Audio Texture algorithms which generate image collages in time to the music:
     - `even` — ignore beats, space images equally.
     - `legacy` — the 2010 algorithm, a faithful port.
-    - `optimal` — the same objective solved exactly by dynamic programming.
+    - `optimal` — the same objective solved exactly by dynamic programming. The default.
     - `novelty` — `optimal`, with beats weighted by audio novelty.
     - `bars` — hold each image a whole number of beats, snapped to a bar length.
 - Movie Generation. Again, supporting anything FFmpeg can write.

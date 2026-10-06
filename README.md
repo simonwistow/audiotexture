@@ -112,7 +112,7 @@ generate flags:
   --out          output movie file                     (--out or --frames)
   --frames       also write numbered frames here, as the original Perl did
   --beats        read beat times from a file instead of detecting them
-  --algorithm    texture algorithm (default "legacy")
+  --algorithm    texture algorithm (default "optimal"; "legacy" with --reproduce-2010)
   --ignore-exif  use images as stored, ignoring the EXIF orientation tag
   --framerate    output frame rate (default 24)
   --width        output width (default 1280)
@@ -305,8 +305,9 @@ The pipeline is four decoupled packages, each usable on its own:
 | `video`   | encode the assignment plus the audio into a movie         |
 
 `Options.Algorithm` takes the algorithm itself, a `texture.Algorithm`, rather
-than its name. The built-ins are `texture.Even`, `texture.Legacy` (the
-default), `texture.Optimal`, `texture.Novelty` and `texture.Bars`. Your own is
+than its name. The built-ins are `texture.Even`, `texture.Legacy`,
+`texture.Optimal` (the default, or `texture.Legacy` with `Reproduce2010`),
+`texture.Novelty` and `texture.Bars`. Your own is
 anything with an `Assign` method:
 
 ```go
@@ -334,11 +335,13 @@ func init() {
   beat within half a shot-length, stack the ones that find nothing and spread
   them out once a later image does. Greedy and not optimal, but it is what
   produced the original videos.
-- **`optimal`** — the same objective solved exactly, by dynamic programming
-  over every beat instead of taking the first that fits. Against a steady
-  pulse this is barely distinguishable from `legacy`; it earns its keep when
-  the beats are sparse or clustered, which is where the greedy version runs
-  out of reachable beats and falls back to spreading images evenly.
+- **`optimal`** — the default. The same objective solved exactly, by dynamic
+  programming over every beat instead of taking the first that fits. Against
+  a steady pulse this is barely distinguishable from `legacy`; it earns its
+  keep when the beats are sparse or clustered, which is where the greedy
+  version runs out of reachable beats and falls back to spreading images
+  evenly. `--reproduce-2010` uses `legacy` instead, unless `--algorithm` says
+  otherwise.
 - **`novelty`** — `optimal`, but beats are weighted by *audio novelty*: how
   much the music changes character there, rather than how loud it is. Cuts
   still land on the pulse, but given a choice of nearby beats they prefer the

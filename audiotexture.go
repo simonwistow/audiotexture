@@ -34,8 +34,9 @@ import (
 type Options struct {
 	// Algorithm decides when each image appears: one of the built-ins such
 	// as texture.Bars, or any texture.Algorithm of your own. Defaults to
-	// texture.Legacy, the behaviour of the original. To choose one by name,
-	// as a command line does, look it up with texture.Get.
+	// texture.Optimal, or to texture.Legacy, the original's, when
+	// Reproduce2010 is set. To choose one by name, as a command line does,
+	// look it up with texture.Get.
 	Algorithm texture.Algorithm
 
 	// Beats, if non-nil, is used instead of analysing the audio. Useful for
@@ -56,8 +57,9 @@ type Options struct {
 
 	// Reproduce2010 replays the original Perl's frame loop, including its
 	// bugs, so that a render matches the 2010 videos frame for frame. See
-	// texture.LegacyFrameSequence. Only meaningful with texture.Legacy. The
-	// 2010 photographs also need IgnoreOrientation.
+	// texture.LegacyFrameSequence. It replays texture.Legacy's loop, so with
+	// no Algorithm set it uses that rather than texture.Optimal. The 2010
+	// photographs also need IgnoreOrientation.
 	Reproduce2010 bool
 
 	// IgnoreOrientation makes GenerateFiles use the images exactly as
@@ -88,7 +90,10 @@ func Generate(imgs images.Images, track io.ReadSeeker, out io.WriteSeeker, opts 
 	}
 	algo := opts.Algorithm
 	if algo == nil {
-		algo = texture.Legacy
+		algo = texture.Optimal
+		if opts.Reproduce2010 {
+			algo = texture.Legacy
+		}
 	}
 
 	names := imgs.Names()

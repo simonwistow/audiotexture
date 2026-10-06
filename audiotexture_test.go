@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/simonwistow/audiotexture"
@@ -121,3 +122,35 @@ type discard struct{}
 
 func (*discard) Write(p []byte) (int, error)    { return len(p), nil }
 func (*discard) Seek(int64, int) (int64, error) { return 0, nil }
+
+// TestGenerateDefaultAlgorithm checks a nil Algorithm means texture.Optimal,
+// and texture.Legacy when reproducing the 2010 renders, whose frame loop it
+// replays.
+func TestGenerateDefaultAlgorithm(t *testing.T) {
+	dir := t.TempDir()
+	imagesDir, audioPath := slideshowFixture(dir)
+	run := func(opts audiotexture.Options) []texture.Onset {
+		t.Helper()
+		opts.Video = video.Options{Width: 160, Height: 90, Preset: "ultrafast"}
+		res, err := audiotexture.GenerateFiles(imagesDir, audioPath, filepath.Join(dir, "out.mp4"), opts)
+		if err != nil {
+			t.Fatalf("GenerateFiles: %v", err)
+		}
+		return res.Onsets
+	}
+	same := func(a, b []texture.Onset) bool {
+		return slices.Equal(a, b)
+	}
+
+	// Otherwise the checks below could not tell the two apart.
+	if same(run(audiotexture.Options{Algorithm: texture.Optimal}), run(audiotexture.Options{Algorithm: texture.Legacy})) {
+		t.Fatal("optimal and legacy agree on this fixture, so it cannot test the default")
+	}
+	if !same(run(audiotexture.Options{}), run(audiotexture.Options{Algorithm: texture.Optimal})) {
+		t.Error("the default is not texture.Optimal")
+	}
+	if !same(run(audiotexture.Options{Reproduce2010: true}),
+		run(audiotexture.Options{Reproduce2010: true, Algorithm: texture.Legacy})) {
+		t.Error("the default with Reproduce2010 is not texture.Legacy")
+	}
+}

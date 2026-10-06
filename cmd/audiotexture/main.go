@@ -90,7 +90,7 @@ func runGenerate(args []string) error {
 	beatFile := fs.String("beats", "", "read beat times from a file instead of detecting them")
 	reproduce := fs.Bool("reproduce-2010", false, "reproduce the original Perl's frame loop, bugs and all")
 	ignoreEXIF := fs.Bool("ignore-exif", false, "use images exactly as stored, ignoring the EXIF orientation tag")
-	algorithm := fs.String("algorithm", "legacy", "texture algorithm (see list-algorithms)")
+	algorithm := fs.String("algorithm", "", `texture algorithm (see list-algorithms); default "optimal", or "legacy" with --reproduce-2010`)
 	framerate := fs.Float64("framerate", video.DefaultFrameRate, "output frame rate")
 	width := fs.Int("width", video.DefaultWidth, "output width in pixels")
 	height := fs.Int("height", video.DefaultHeight, "output height in pixels")
@@ -125,6 +125,14 @@ func runGenerate(args []string) error {
 		astiav.SetLogLevel(astiav.LogLevelQuiet)
 	}
 
+	// --reproduce-2010 replays the legacy algorithm's frame loop, so that is
+	// what it gets unless another is asked for.
+	if *algorithm == "" {
+		*algorithm = "optimal"
+		if *reproduce {
+			*algorithm = "legacy"
+		}
+	}
 	algo, err := texture.Get(*algorithm)
 	if err != nil {
 		return err

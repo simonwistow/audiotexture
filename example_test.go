@@ -104,9 +104,9 @@ func ExampleGenerate() {
 }
 
 // GenerateFiles takes paths instead, and the zero Options is usable, so the
-// shortest form supplies only the three paths. That gives texture.Legacy, the
-// algorithm that produced the 2010 videos, at the default 1280x720 and
-// 24 fps, in the container the output's extension names.
+// shortest form supplies only the three paths. That gives texture.Optimal at
+// the default 1280x720 and 24 fps, in the container the output's extension
+// names.
 func ExampleGenerateFiles() {
 	dir, err := os.MkdirTemp("", "audiotexture")
 	if err != nil {
