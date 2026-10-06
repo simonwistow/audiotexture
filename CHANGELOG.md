@@ -6,6 +6,8 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-06
+
 ### Added
 
 - Data Input:
@@ -34,4 +36,5 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - FFmpeg 8.x is required. The bindings are pinned to that ABI and will not
   build against 7 or 9.
 
-[Unreleased]: https://github.com/simonwistow/audiotexture/commits/main
+[Unreleased]: https://github.com/simonwistow/audiotexture/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/simonwistow/audiotexture/releases/tag/v0.1.0
